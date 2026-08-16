@@ -276,6 +276,12 @@ impl LockfileDocument {
   pub fn externally_modified(&self) -> Result<bool> {
     on_disk_bytes_changed(&self.path, self.original.as_deref())
   }
+
+  /// The bytes as loaded, for transactional expected-state checks and
+  /// skip-unchanged-write decisions.
+  pub fn original_bytes(&self) -> Option<&[u8]> {
+    self.original.as_deref()
+  }
 }
 
 fn on_disk_bytes_changed(path: &Path, original: Option<&[u8]>) -> Result<bool> {

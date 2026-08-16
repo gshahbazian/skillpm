@@ -1,14 +1,11 @@
 use std::fmt;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 
 use super::CommandEnv;
 use crate::config::ConfigDocument;
-use crate::github;
-use crate::local;
-use crate::lockfile::{self, LockedSkill};
+use crate::lockfile;
 use crate::output;
-use crate::source::{Source, parse_source};
 use crate::store::{SnapshotStatus, Store};
 use crate::targets::{self, InstallAction};
 use crate::transaction::Transaction;
@@ -67,7 +64,7 @@ pub(crate) fn execute(env: &CommandEnv) -> Result<InstallSummary> {
             "missing"
           }
         ));
-        reconstruct(env, &store, name, entry)?;
+        super::reconstruct_locked(env, &store, name, entry)?;
         reconstructed += 1;
       }
     }
@@ -105,22 +102,6 @@ pub(crate) fn execute(env: &CommandEnv) -> Result<InstallSummary> {
 
   transaction.commit()?;
   Ok(summary)
-}
-
-fn reconstruct(env: &CommandEnv, store: &Store, name: &str, entry: &LockedSkill) -> Result<()> {
-  let result = match parse_source(&entry.source)? {
-    Source::GitHub(source) => {
-      let commit = entry
-        .commit
-        .as_deref()
-        .context("GitHub lock entry has no commit")?;
-      github::reconstruct_github_snapshot(&env.git, store, &source, commit, &entry.content_hash)
-    }
-    Source::Local(source) => {
-      local::reconstruct_local_snapshot(store, &source, &env.paths.home, &entry.content_hash)
-    }
-  };
-  result.with_context(|| format!("failed to reconstruct the snapshot for skill '{name}'"))
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 ---
 name: Add command workflow
-status: pending
+status: done
 ---
 
 # Goal

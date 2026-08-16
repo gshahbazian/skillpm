@@ -132,6 +132,61 @@ impl ConfigDocument {
     Ok(())
   }
 
+  /// Appends targets to one skill's existing array. Unlike upsert_skill this
+  /// never rewrites source/ref or the existing elements, so their comments
+  /// and formatting survive.
+  pub fn append_targets(&mut self, name: &str, new_targets: &[PathBuf]) -> Result<()> {
+    let entry = self
+      .doc
+      .get_mut("skills")
+      .and_then(Item::as_table_like_mut)
+      .and_then(|skills| skills.get_mut(name))
+      .and_then(Item::as_table_like_mut)
+      .with_context(|| format!("skill '{name}' is not in spm.toml"))?;
+    let array = entry
+      .get_mut("targets")
+      .and_then(Item::as_array_mut)
+      .with_context(|| format!("skill '{name}' has no targets array"))?;
+
+    // a plain push would land AFTER the array's trailing decor, displacing a
+    // comment like `"a", # primary` behind the new element; in multiline
+    // arrays, re-home that trailing decor as the first new element's prefix
+    let trailing = array.trailing().as_str().unwrap_or("").to_string();
+    let multiline = trailing.contains('\n')
+      || array.iter().any(|value| {
+        value
+          .decor()
+          .prefix()
+          .and_then(|prefix| prefix.as_str())
+          .is_some_and(|prefix| prefix.contains('\n'))
+      });
+
+    for (index, target) in new_targets.iter().enumerate() {
+      let text = target
+        .to_str()
+        .with_context(|| format!("target {} is not UTF-8", target.display()))?;
+      array.push(text);
+
+      if multiline && let Some(value) = array.iter_mut().last() {
+        let prefix = if index == 0 {
+          format!("{}\n  ", trailing.trim_end_matches('\n'))
+        } else {
+          "\n  ".to_string()
+        };
+        value.decor_mut().set_prefix(prefix);
+      }
+    }
+
+    if multiline && !new_targets.is_empty() {
+      array.set_trailing("\n");
+      array.set_trailing_comma(true);
+    }
+
+    // the schema stays strict through edits, not just loads
+    validate(&self.doc)?;
+    Ok(())
+  }
+
   pub fn remove_skill(&mut self, name: &str) -> Result<()> {
     let removed = self
       .doc
@@ -182,6 +237,19 @@ impl ConfigDocument {
         Err(error).with_context(|| format!("failed to read config {}", self.path.display()))
       }
     }
+  }
+
+  /// Validated bytes of the current (possibly edited) document, for
+  /// transactional writes.
+  pub fn rendered_bytes(&self) -> Result<Vec<u8>> {
+    validate(&self.doc)?;
+    Ok(self.doc.to_string().into_bytes())
+  }
+
+  /// The bytes as loaded (None: the file did not exist), for transactional
+  /// expected-state checks.
+  pub fn original_bytes(&self) -> Option<&[u8]> {
+    self.original.as_deref()
   }
 }
 

@@ -20,28 +20,18 @@ fn spm(args: &[&str]) -> Output {
 
 #[test]
 fn stub_commands_fail_with_errors_on_stderr_only() {
-  for args in [
-    vec!["add", "skills/x", "--target", ".claude/skills/x"],
-    vec!["remove", "x"],
-  ] {
-    let output = spm(&args);
+  // `remove` is the last remaining stub
+  let output = spm(&["remove", "x"]);
 
-    assert!(!output.status.success(), "expected failure for {args:?}");
-    assert!(
-      output.stdout.is_empty(),
-      "stdout must stay clean for {args:?}"
-    );
+  assert!(!output.status.success());
+  assert!(output.stdout.is_empty(), "stdout must stay clean");
 
-    let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(
-      stderr.contains("error: "),
-      "missing error prefix for {args:?}: {stderr}"
-    );
-    assert!(
-      stderr.contains("not implemented"),
-      "unexpected stderr for {args:?}: {stderr}"
-    );
-  }
+  let stderr = String::from_utf8(output.stderr).unwrap();
+  assert!(stderr.contains("error: "), "missing error prefix: {stderr}");
+  assert!(
+    stderr.contains("not implemented"),
+    "unexpected stderr: {stderr}"
+  );
 }
 
 #[test]

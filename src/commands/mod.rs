@@ -6,8 +6,12 @@ mod update;
 use anyhow::{Context, Result, bail};
 
 use crate::cli::Command;
-use crate::github::GitClient;
+use crate::github::{self, GitClient};
+use crate::local;
+use crate::lockfile::LockedSkill;
 use crate::paths::{OperationLock, Paths, create_private_dir};
+use crate::source::{Source, parse_source};
+use crate::store::Store;
 
 /// The process-level dependencies every command workflow needs; tests build
 /// this against temporary homes and local file:// remotes.
@@ -54,4 +58,27 @@ pub(crate) fn acquire_lock(paths: &Paths) -> Result<OperationLock> {
       .with_context(|| format!("failed to recreate {}", paths.data_root.display()))?;
   }
   OperationLock::acquire(&paths.operation_lock)
+}
+
+/// Rebuilds a missing/corrupt snapshot at its exact locked version: GitHub
+/// from the locked commit, local only on an exact source-hash match.
+pub(crate) fn reconstruct_locked(
+  env: &CommandEnv,
+  store: &Store,
+  name: &str,
+  entry: &LockedSkill,
+) -> Result<()> {
+  let result = match parse_source(&entry.source)? {
+    Source::GitHub(source) => {
+      let commit = entry
+        .commit
+        .as_deref()
+        .context("GitHub lock entry has no commit")?;
+      github::reconstruct_github_snapshot(&env.git, store, &source, commit, &entry.content_hash)
+    }
+    Source::Local(source) => {
+      local::reconstruct_local_snapshot(store, &source, &env.paths.home, &entry.content_hash)
+    }
+  };
+  result.with_context(|| format!("failed to reconstruct the snapshot for skill '{name}'"))
 }

@@ -119,7 +119,8 @@ pub fn plan_targets(
 /// already-installed target is itself a symlink into the store, and following
 /// it would misreport every reinstall as a protected-directory overlap (and
 /// collapse distinct targets of one snapshot into "duplicates").
-fn canonical_target(resolved: &Path) -> Result<PathBuf> {
+/// This is the one canonical identity for targets; merging uses it too.
+pub(crate) fn canonical_target(resolved: &Path) -> Result<PathBuf> {
   let name = resolved
     .file_name()
     .with_context(|| format!("target '{}' has no final component", resolved.display()))?;
