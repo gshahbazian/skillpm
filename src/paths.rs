@@ -391,7 +391,19 @@ mod tests {
     assert!(error.to_string().contains("another spm process"));
 
     drop(held);
-    OperationLock::acquire(&lock_path).unwrap();
+
+    // a concurrently forked test subprocess can briefly hold an inherited
+    // duplicate of the descriptor, keeping the flock alive past our drop;
+    // retry for a moment instead of flaking
+    let mut reacquired = OperationLock::acquire(&lock_path);
+    for _ in 0..100 {
+      if reacquired.is_ok() {
+        break;
+      }
+      std::thread::sleep(std::time::Duration::from_millis(10));
+      reacquired = OperationLock::acquire(&lock_path);
+    }
+    reacquired.unwrap();
   }
 
   #[test]

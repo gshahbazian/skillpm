@@ -1,6 +1,6 @@
 ---
 name: Target planning and symlink transactions
-status: pending
+status: done
 ---
 
 # Goal
