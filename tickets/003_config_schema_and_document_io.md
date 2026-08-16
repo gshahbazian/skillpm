@@ -1,6 +1,6 @@
 ---
 name: Config schema and document editing
-status: pending
+status: done
 ---
 
 # Goal
