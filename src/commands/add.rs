@@ -196,7 +196,7 @@ fn stage_and_commit(
       // a same-name skill from a different source/ref requires explicit removal
       if config.skills.contains_key(&skill_name) {
         bail!(
-          "skill '{skill_name}' is already configured from a different source or ref; run `spm remove {skill_name}` first"
+          "skill '{skill_name}' is already configured from a different source or ref; run `skillpm remove {skill_name}` first"
         );
       }
 
@@ -278,12 +278,12 @@ fn stage_and_commit(
   // re-read metadata bytes immediately before committing (README section 10);
   // these also cover the skip-unchanged-write paths
   if config_doc.externally_modified()? {
-    bail!("spm.toml changed while spm was running; aborting without changes");
+    bail!("skillpm.toml changed while skillpm was running; aborting without changes");
   }
   if let Some(doc) = lock_doc
     && doc.externally_modified()?
   {
-    bail!("spm.lock changed while spm was running; aborting without changes");
+    bail!("skillpm.lock changed while skillpm was running; aborting without changes");
   }
 
   transaction.commit()?;
@@ -644,7 +644,11 @@ targets = [
       None,
     )
     .unwrap_err();
-    assert!(error.to_string().contains("run `spm remove local-skill`"));
+    assert!(
+      error
+        .to_string()
+        .contains("run `skillpm remove local-skill`")
+    );
   }
 
   #[test]
@@ -663,7 +667,7 @@ targets = [
       None,
     )
     .unwrap_err();
-    assert!(error.to_string().contains("run `spm update`"));
+    assert!(error.to_string().contains("run `skillpm update`"));
   }
 
   #[test]
@@ -753,6 +757,6 @@ targets = [
     })
     .unwrap_err();
 
-    assert!(error.to_string().contains("spm.toml changed"));
+    assert!(error.to_string().contains("skillpm.toml changed"));
   }
 }

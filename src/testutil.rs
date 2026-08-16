@@ -27,11 +27,11 @@ impl World {
   pub fn paths(&self) -> Paths {
     Paths {
       home: self.home.clone(),
-      config_file: self.home.join(".config/spm/spm.toml"),
-      lockfile: self.home.join(".config/spm/spm.lock"),
-      data_root: self.home.join(".local/share/spm"),
-      store: self.home.join(".local/share/spm/store"),
-      operation_lock: self.home.join(".local/share/spm/.operation.lock"),
+      config_file: self.home.join(".config/skillpm/skillpm.toml"),
+      lockfile: self.home.join(".config/skillpm/skillpm.lock"),
+      data_root: self.home.join(".local/share/skillpm"),
+      store: self.home.join(".local/share/skillpm/store"),
+      operation_lock: self.home.join(".local/share/skillpm/.operation.lock"),
     }
   }
 
@@ -87,11 +87,11 @@ impl World {
 /// Retries a command on transient operation-lock contention. Concurrently
 /// forked test subprocesses briefly inherit lock descriptors between fork and
 /// exec, so an acquire right after a release can spuriously see a held lock.
-/// Production is immune: each spm process holds the lock until it exits.
+/// Production is immune: each skillpm process holds the lock until it exits.
 pub(crate) fn retry_lock<T>(mut run: impl FnMut() -> anyhow::Result<T>) -> anyhow::Result<T> {
   for _ in 0..100 {
     match run() {
-      Err(error) if error.to_string().contains("another spm process") => {
+      Err(error) if error.to_string().contains("another skillpm process") => {
         std::thread::sleep(Duration::from_millis(10));
       }
       other => return other,

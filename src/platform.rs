@@ -3,12 +3,12 @@ use anyhow::{Result, bail};
 /// v1 never falls back to copied targets, so anything but macOS/Linux is a hard error.
 pub fn ensure_supported() -> Result<()> {
   if cfg!(target_os = "windows") {
-    bail!("Windows is not supported; spm requires macOS or Linux");
+    bail!("Windows is not supported; skillpm requires macOS or Linux");
   }
 
   if !cfg!(any(target_os = "macos", target_os = "linux")) {
     bail!(
-      "unsupported platform '{}'; spm requires macOS or Linux",
+      "unsupported platform '{}'; skillpm requires macOS or Linux",
       std::env::consts::OS
     );
   }

@@ -27,7 +27,7 @@ impl Lockfile {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LockedSkill {
-  /// Mirrors spm.toml for stale-lock detection.
+  /// Mirrors skillpm.toml for stale-lock detection.
   pub source: String,
   pub r#ref: Option<String>,
   /// Exact resolved commit; present for GitHub sources only.
@@ -84,7 +84,7 @@ fn classify(bytes: &[u8]) -> LockState {
   };
 
   // version decides before strict schema checks: a newer lockfile may have
-  // fields this spm has never heard of, and that is not "malformed"
+  // fields this skillpm has never heard of, and that is not "malformed"
   let Some(version) = doc.get("version").and_then(Item::as_integer) else {
     return malformed("missing or non-integer 'version'".into());
   };
@@ -111,15 +111,15 @@ pub fn require_fresh(path: &Path, config: &Config) -> Result<LockfileDocument> {
   };
 
   match state {
-    LockState::Missing => bail!("spm.lock is missing; run `spm update`"),
+    LockState::Missing => bail!("skillpm.lock is missing; run `skillpm update`"),
     LockState::Malformed { reason } => {
-      bail!("spm.lock is malformed ({reason}); run `spm update`")
+      bail!("skillpm.lock is malformed ({reason}); run `skillpm update`")
     }
     LockState::Older { version } => bail!(
-      "spm.lock version {version} is older than supported version {LOCK_VERSION}; run `spm update`"
+      "skillpm.lock version {version} is older than supported version {LOCK_VERSION}; run `skillpm update`"
     ),
     LockState::Newer { version } => {
-      bail!("spm.lock version {version} is newer than this spm supports; upgrade spm")
+      bail!("skillpm.lock version {version} is newer than this skillpm supports; upgrade skillpm")
     }
     LockState::Valid { lockfile } => {
       check_matches_config(&lockfile, config)?;
@@ -168,7 +168,7 @@ pub fn load_for_update(path: &Path) -> Result<UpdateLockDocument> {
 
   let reusable = match state {
     LockState::Newer { version } => bail!(
-      "spm.lock version {version} is newer than this spm supports and will not be overwritten; upgrade spm"
+      "skillpm.lock version {version} is newer than this skillpm supports and will not be overwritten; upgrade skillpm"
     ),
     LockState::Valid { lockfile } => Some(lockfile),
     LockState::Missing | LockState::Malformed { .. } | LockState::Older { .. } => None,
@@ -184,19 +184,21 @@ pub fn load_for_update(path: &Path) -> Result<UpdateLockDocument> {
 fn check_matches_config(lockfile: &Lockfile, config: &Config) -> Result<()> {
   for (name, skill) in &config.skills {
     let Some(entry) = lockfile.skills.get(name) else {
-      bail!("spm.lock has no entry for skill '{name}'; run `spm update`");
+      bail!("skillpm.lock has no entry for skill '{name}'; run `skillpm update`");
     };
     if entry.source != skill.source {
-      bail!("spm.lock entry for '{name}' was locked from a different source; run `spm update`");
+      bail!(
+        "skillpm.lock entry for '{name}' was locked from a different source; run `skillpm update`"
+      );
     }
     if entry.r#ref != skill.r#ref {
-      bail!("spm.lock entry for '{name}' was locked at a different ref; run `spm update`");
+      bail!("skillpm.lock entry for '{name}' was locked at a different ref; run `skillpm update`");
     }
   }
 
   for name in lockfile.skills.keys() {
     if !config.skills.contains_key(name) {
-      bail!("spm.lock has an entry for unknown skill '{name}'; run `spm update`");
+      bail!("skillpm.lock has an entry for unknown skill '{name}'; run `skillpm update`");
     }
   }
 
@@ -458,7 +460,7 @@ mod tests {
   }
 
   fn write_lock(dir: &Path, contents: &str) -> PathBuf {
-    let path = dir.join("spm.lock");
+    let path = dir.join("skillpm.lock");
     fs::write(&path, contents).unwrap();
     path
   }
@@ -519,7 +521,7 @@ content_hash = "{HASH_B}"
   fn state_classification() {
     let temp = tempfile::tempdir().unwrap();
 
-    let missing = temp.path().join("spm.lock");
+    let missing = temp.path().join("skillpm.lock");
     assert!(matches!(
       read_lock_state(&missing).unwrap(),
       LockState::Missing
@@ -640,15 +642,15 @@ content_hash = "{HASH_B}"
     let config = config_matching_mixed();
 
     // missing file
-    let missing = temp.path().join("spm.lock");
+    let missing = temp.path().join("skillpm.lock");
     let error = require_fresh(&missing, &config).unwrap_err();
-    assert!(error.to_string().contains("run `spm update`"));
+    assert!(error.to_string().contains("run `skillpm update`"));
 
     // malformed / older / newer
     for (contents, expected) in [
       ("nope [", "malformed"),
       ("version = 0\n", "older"),
-      ("version = 9\n", "upgrade spm"),
+      ("version = 9\n", "upgrade skillpm"),
     ] {
       let path = write_lock(temp.path(), contents);
       let error = require_fresh(&path, &config).unwrap_err();
@@ -709,7 +711,7 @@ content_hash = "{HASH_B}"
   fn update_can_regenerate_everything_except_newer() {
     let temp = tempfile::tempdir().unwrap();
 
-    let missing = temp.path().join("spm.lock");
+    let missing = temp.path().join("skillpm.lock");
     assert_eq!(load_for_update(&missing).unwrap().reusable, None);
 
     for contents in ["nope [", "version = 0\n"] {
@@ -790,7 +792,7 @@ content_hash = "{HASH_B}"
   #[test]
   fn atomic_write_replaces_content_and_leaves_no_siblings() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("spm.lock");
+    let path = temp.path().join("skillpm.lock");
 
     write_atomic(&path, &Lockfile::empty()).unwrap();
     assert_eq!(fs::read_to_string(&path).unwrap(), "version = 1\n");
@@ -805,7 +807,7 @@ content_hash = "{HASH_B}"
       .unwrap()
       .map(|entry| entry.unwrap().file_name())
       .collect();
-    assert_eq!(entries, vec![std::ffi::OsString::from("spm.lock")]);
+    assert_eq!(entries, vec![std::ffi::OsString::from("skillpm.lock")]);
   }
 
   #[test]

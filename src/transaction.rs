@@ -321,7 +321,7 @@ fn set_symlink_atomic(path: &Path, destination: &Path) -> Result<()> {
       .with_context(|| format!("{} has no parent directory", path.display()))?;
 
     for attempt in 0..100u32 {
-      let temp = parent.join(format!(".spm-link-{}-{attempt}", std::process::id()));
+      let temp = parent.join(format!(".skillpm-link-{}-{attempt}", std::process::id()));
       match std::os::unix::fs::symlink(destination, &temp) {
         Ok(()) => {
           return fs::rename(&temp, path).map_err(|error| {
@@ -405,7 +405,7 @@ mod tests {
     }
 
     fn config(&self) -> PathBuf {
-      self.root().join("spm.toml")
+      self.root().join("skillpm.toml")
     }
 
     fn old_link(&self) -> PathBuf {
@@ -471,7 +471,7 @@ mod tests {
           let entry = entry.unwrap();
           let name = entry.file_name().to_string_lossy().into_owned();
           assert!(
-            !name.starts_with(".spm-link-") && !name.starts_with(".tmp"),
+            !name.starts_with(".skillpm-link-") && !name.starts_with(".tmp"),
             "temporary artifact left behind: {}",
             entry.path().display()
           );
@@ -485,7 +485,7 @@ mod tests {
 
   fn world() -> World {
     let temp = tempfile::tempdir().unwrap();
-    fs::write(temp.path().join("spm.toml"), b"old config").unwrap();
+    fs::write(temp.path().join("skillpm.toml"), b"old config").unwrap();
     fs::create_dir(temp.path().join("targets")).unwrap();
     std::os::unix::fs::symlink("/store/old-snapshot", temp.path().join("targets/existing"))
       .unwrap();
@@ -522,13 +522,13 @@ mod tests {
   #[test]
   fn externally_edited_files_abort_the_commit() {
     let world = world();
-    fs::write(world.config(), b"edited behind spm's back").unwrap();
+    fs::write(world.config(), b"edited behind skillpm's back").unwrap();
 
     let error = world.transaction().commit().unwrap_err();
     assert!(error.to_string().contains("modified by another process"));
     assert_eq!(
       fs::read(world.config()).unwrap(),
-      b"edited behind spm's back"
+      b"edited behind skillpm's back"
     );
     assert_eq!(
       read_link(&world.old_link()),
@@ -722,7 +722,7 @@ mod tests {
       b"new config".to_vec(),
       ExpectedFile::Bytes(b"old config".to_vec()),
     );
-    tx.remove_symlink(&world.config(), ExpectedLink::AnySymlink); // fails: spm.toml is a regular file
+    tx.remove_symlink(&world.config(), ExpectedLink::AnySymlink); // fails: skillpm.toml is a regular file
     tx.commit().unwrap_err();
     assert_still_linked(&world);
     assert_eq!(fs::read(&real).unwrap(), b"old config");

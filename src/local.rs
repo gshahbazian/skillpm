@@ -68,7 +68,7 @@ fn prepare_with_hook(
       let _ = store.remove_snapshot(&committed.content_hash);
     }
     bail!(
-      "local source {} changed while spm was preparing it; rerun the command",
+      "local source {} changed while skillpm was preparing it; rerun the command",
       resolved.display()
     );
   }
@@ -117,7 +117,7 @@ pub fn reconstruct_local_snapshot(
   let current_hash = snapshot::hash_tree(&tree)?;
   if current_hash != locked_hash {
     bail!(
-      "local source {} no longer matches its locked snapshot; run `spm update`",
+      "local source {} no longer matches its locked snapshot; run `skillpm update`",
       resolved.display()
     );
   }
@@ -128,7 +128,7 @@ pub fn reconstruct_local_snapshot(
       let _ = store.remove_snapshot(&committed.content_hash);
     }
     bail!(
-      "local source {} changed while spm was reconstructing it; rerun the command",
+      "local source {} changed while skillpm was reconstructing it; rerun the command",
       resolved.display()
     );
   }
@@ -271,7 +271,7 @@ mod tests {
     assert!(
       error
         .to_string()
-        .contains("changed while spm was preparing")
+        .contains("changed while skillpm was preparing")
     );
 
     // the possibly-torn snapshot must not stay committed
@@ -387,8 +387,8 @@ mod tests {
     let fixture = fixture();
 
     // stand-ins for config, lock, and an installed target
-    let config = fixture.temp.path().join("spm.toml");
-    let lock = fixture.temp.path().join("spm.lock");
+    let config = fixture.temp.path().join("skillpm.toml");
+    let lock = fixture.temp.path().join("skillpm.lock");
     fs::write(&config, "version = 1\n").unwrap();
     fs::write(&lock, "version = 1\n").unwrap();
     #[cfg(unix)]

@@ -368,7 +368,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "spm"
+name = "skillpm"
 version = "0.1.0"
 dependencies = [
  "anyhow",

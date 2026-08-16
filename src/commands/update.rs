@@ -232,10 +232,10 @@ fn prepare_and_commit(
   // section 10); the lock check must run even when the lockfile is unchanged
   // and therefore not part of the transaction
   if config_doc.externally_modified()? {
-    bail!("spm.toml changed while spm was running; aborting without changes");
+    bail!("skillpm.toml changed while skillpm was running; aborting without changes");
   }
   if update_lock.externally_modified()? {
-    bail!("spm.lock changed while spm was running; aborting without changes");
+    bail!("skillpm.lock changed while skillpm was running; aborting without changes");
   }
 
   transaction.commit()?;
@@ -604,7 +604,7 @@ targets = ["links/skill-two"]
     .unwrap_err();
 
     assert!(
-      error.to_string().contains("spm.lock changed"),
+      error.to_string().contains("skillpm.lock changed"),
       "unexpected error: {error:#}"
     );
   }

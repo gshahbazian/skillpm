@@ -29,7 +29,7 @@ pub struct Skill {
   pub targets: Vec<PathBuf>,
 }
 
-/// A loaded `spm.toml` that supports surgical edits: comments, ordering, and
+/// A loaded `skillpm.toml` that supports surgical edits: comments, ordering, and
 /// unrelated formatting survive add/remove.
 #[derive(Debug)]
 pub struct ConfigDocument {
@@ -140,7 +140,7 @@ impl ConfigDocument {
       .and_then(Item::as_table_like_mut)
       .and_then(|skills| skills.get_mut(name))
       .and_then(Item::as_table_like_mut)
-      .with_context(|| format!("skill '{name}' is not in spm.toml"))?;
+      .with_context(|| format!("skill '{name}' is not in skillpm.toml"))?;
     let array = entry
       .get_mut("targets")
       .and_then(Item::as_array_mut)
@@ -193,7 +193,7 @@ impl ConfigDocument {
       .and_then(|skills| skills.remove(name));
 
     if removed.is_none() {
-      bail!("skill '{name}' is not in spm.toml");
+      bail!("skill '{name}' is not in skillpm.toml");
     }
     Ok(())
   }
@@ -267,18 +267,18 @@ fn targets_array(targets: &[PathBuf]) -> Result<Item> {
 fn validate(doc: &DocumentMut) -> Result<Config> {
   for (key, _) in doc.iter() {
     if key != "version" && key != "skills" {
-      bail!("unknown top-level field '{key}' in spm.toml");
+      bail!("unknown top-level field '{key}' in skillpm.toml");
     }
   }
 
   let Some(version) = doc.get("version") else {
-    bail!("spm.toml is missing 'version'");
+    bail!("skillpm.toml is missing 'version'");
   };
   let Some(version) = version.as_integer() else {
     bail!("'version' must be an integer");
   };
   if version != CONFIG_VERSION {
-    bail!("unsupported config version {version}; this spm supports version {CONFIG_VERSION}");
+    bail!("unsupported config version {version}; this skillpm supports version {CONFIG_VERSION}");
   }
 
   let mut skills = BTreeMap::new();
@@ -290,7 +290,7 @@ fn validate(doc: &DocumentMut) -> Result<Config> {
 
     for (name, item) in table.iter() {
       let skill = validate_skill(name, item)
-        .with_context(|| format!("invalid skill '{name}' in spm.toml"))?;
+        .with_context(|| format!("invalid skill '{name}' in skillpm.toml"))?;
       skills.insert(name.to_string(), skill);
     }
   }
@@ -385,7 +385,7 @@ targets = [".claude/skills/my-local-skill"]
 "#;
 
   fn write_config(dir: &Path, contents: &str) -> PathBuf {
-    let path = dir.join("spm.toml");
+    let path = dir.join("skillpm.toml");
     fs::write(&path, contents).unwrap();
     path
   }
@@ -624,7 +624,7 @@ targets = [".claude/skills/my-local-skill"]
   #[test]
   fn load_or_empty_bootstraps_a_canonical_config() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("spm.toml");
+    let path = temp.path().join("skillpm.toml");
 
     let doc = ConfigDocument::load_or_empty(&path).unwrap();
     let config = doc.config().unwrap();
@@ -639,10 +639,10 @@ targets = [".claude/skills/my-local-skill"]
   #[cfg(unix)]
   fn symlinked_config_is_edited_through_the_link() {
     let temp = tempfile::tempdir().unwrap();
-    let real = temp.path().join("real-spm.toml");
+    let real = temp.path().join("real-skillpm.toml");
     fs::write(&real, SAMPLE).unwrap();
 
-    let link = temp.path().join("spm.toml");
+    let link = temp.path().join("skillpm.toml");
     std::os::unix::fs::symlink(&real, &link).unwrap();
 
     let mut doc = ConfigDocument::load(&link).unwrap();
@@ -662,8 +662,8 @@ targets = [".claude/skills/my-local-skill"]
   #[cfg(unix)]
   fn dangling_config_symlink_is_not_replaced() {
     let temp = tempfile::tempdir().unwrap();
-    let real = temp.path().join("real-spm.toml");
-    let link = temp.path().join("spm.toml");
+    let real = temp.path().join("real-skillpm.toml");
+    let link = temp.path().join("skillpm.toml");
     std::os::unix::fs::symlink(&real, &link).unwrap();
 
     let doc = ConfigDocument::load_or_empty(&link).unwrap();
@@ -754,7 +754,7 @@ targets = [".claude/skills/my-local-skill"]
       .unwrap()
       .map(|entry| entry.unwrap().file_name())
       .collect();
-    assert_eq!(entries, vec![std::ffi::OsString::from("spm.toml")]);
+    assert_eq!(entries, vec![std::ffi::OsString::from("skillpm.toml")]);
   }
 
   #[test]

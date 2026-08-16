@@ -110,10 +110,10 @@ fn execute_with_hook(
 
   // re-read metadata bytes immediately before committing (README section 10)
   if config_doc.externally_modified()? {
-    bail!("spm.toml changed while spm was running; aborting without changes");
+    bail!("skillpm.toml changed while skillpm was running; aborting without changes");
   }
   if lock_doc.externally_modified()? {
-    bail!("spm.lock changed while spm was running; aborting without changes");
+    bail!("skillpm.lock changed while skillpm was running; aborting without changes");
   }
 
   transaction.commit()?;
@@ -298,7 +298,7 @@ mod tests {
       })
     })
     .unwrap_err();
-    assert!(error.to_string().contains("spm.toml changed"));
+    assert!(error.to_string().contains("skillpm.toml changed"));
 
     // the staged unlink never happened
     assert!(
@@ -398,6 +398,6 @@ mod tests {
     fs::write(world.paths().lockfile, "version = 1\n").unwrap();
 
     let error = execute(&world.offline_env(), "skill-one").unwrap_err();
-    assert!(error.to_string().contains("run `spm update`"));
+    assert!(error.to_string().contains("run `skillpm update`"));
   }
 }

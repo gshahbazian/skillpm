@@ -35,7 +35,7 @@ impl GitClient {
 
     Self {
       program: PathBuf::from("git"),
-      timeout: timeout_from(std::env::var("SPM_GIT_TIMEOUT_SECONDS").ok().as_deref()),
+      timeout: timeout_from(std::env::var("SKILLPM_GIT_TIMEOUT_SECONDS").ok().as_deref()),
       tokens,
       // always the real URL: black-box tests redirect it with an isolated
       // git config (url.<file-base>.insteadOf), not a runtime override
@@ -196,7 +196,7 @@ impl GitClient {
       Ok(child) => child,
       Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
         bail!(
-          "git executable '{}' was not found; spm requires the system git",
+          "git executable '{}' was not found; skillpm requires the system git",
           self.program.display()
         );
       }
@@ -236,7 +236,7 @@ impl GitClient {
       if start.elapsed() >= self.timeout {
         kill_process_group(child);
         bail!(
-          "git timed out after {} seconds (override with SPM_GIT_TIMEOUT_SECONDS)",
+          "git timed out after {} seconds (override with SKILLPM_GIT_TIMEOUT_SECONDS)",
           self.timeout.as_secs_f64()
         );
       }
@@ -424,7 +424,7 @@ pub fn reconstruct_github_snapshot(
       let _ = store.remove_snapshot(&committed.content_hash);
     }
     bail!(
-      "github:{}/{} at {commit} no longer reproduces its locked snapshot; run `spm update`",
+      "github:{}/{} at {commit} no longer reproduces its locked snapshot; run `skillpm update`",
       source.owner,
       source.repo
     );
@@ -1018,7 +1018,11 @@ mod tests {
     };
 
     let error = client.resolve_ref(&source, Some("main")).unwrap_err();
-    assert!(error.to_string().contains("spm requires the system git"));
+    assert!(
+      error
+        .to_string()
+        .contains("skillpm requires the system git")
+    );
   }
 
   #[test]

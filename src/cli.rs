@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Parser)]
-#[command(name = "spm", version, about = "Declarative skill package manager")]
+#[command(name = "skillpm", version, about = "Declarative skill package manager")]
 pub struct Cli {
   #[command(subcommand)]
   pub command: Command,
@@ -11,13 +11,13 @@ pub struct Cli {
 
 #[derive(Debug, PartialEq, Subcommand)]
 pub enum Command {
-  /// Reproduce spm.lock exactly, without resolving new versions
+  /// Reproduce skillpm.lock exactly, without resolving new versions
   Install,
 
   /// Resolve new versions and regenerate the lockfile
   Update,
 
-  /// Fetch a source, add it to spm.toml, and install its targets
+  /// Fetch a source, add it to skillpm.toml, and install its targets
   Add {
     /// GitHub source (github:owner/repo/path) or local path
     source: String,
@@ -31,7 +31,7 @@ pub enum Command {
     r#ref: Option<String>,
   },
 
-  /// Unlink a skill's targets and remove it from spm.toml
+  /// Unlink a skill's targets and remove it from skillpm.toml
   Remove { name: String },
 }
 
@@ -45,18 +45,18 @@ mod tests {
 
   #[test]
   fn install_parses() {
-    assert_eq!(parse(&["spm", "install"]).unwrap(), Command::Install);
+    assert_eq!(parse(&["skillpm", "install"]).unwrap(), Command::Install);
   }
 
   #[test]
   fn update_parses() {
-    assert_eq!(parse(&["spm", "update"]).unwrap(), Command::Update);
+    assert_eq!(parse(&["skillpm", "update"]).unwrap(), Command::Update);
   }
 
   #[test]
   fn add_parses_source_and_target() {
     let command = parse(&[
-      "spm",
+      "skillpm",
       "add",
       "github:anthropics/skills/frontend-design",
       "--target",
@@ -77,7 +77,7 @@ mod tests {
   #[test]
   fn add_parses_repeated_targets() {
     let command = parse(&[
-      "spm",
+      "skillpm",
       "add",
       "github:anthropics/skills/frontend-design",
       "--target",
@@ -102,7 +102,7 @@ mod tests {
   #[test]
   fn add_parses_ref() {
     let command = parse(&[
-      "spm",
+      "skillpm",
       "add",
       "github:anthropics/skills/frontend-design",
       "--target",
@@ -122,7 +122,7 @@ mod tests {
   fn add_parses_ref_for_local_source() {
     // ref-vs-source validation belongs to the source layer, not the parser
     let command = parse(&[
-      "spm",
+      "skillpm",
       "add",
       "skills/my-local-skill",
       "--target",
@@ -141,7 +141,7 @@ mod tests {
   #[test]
   fn remove_parses_name() {
     assert_eq!(
-      parse(&["spm", "remove", "frontend-design"]).unwrap(),
+      parse(&["skillpm", "remove", "frontend-design"]).unwrap(),
       Command::Remove {
         name: "frontend-design".into(),
       }
@@ -150,29 +150,29 @@ mod tests {
 
   #[test]
   fn bare_invocation_is_an_error() {
-    assert!(parse(&["spm"]).is_err());
+    assert!(parse(&["skillpm"]).is_err());
   }
 
   #[test]
   fn unknown_subcommand_is_an_error() {
-    assert!(parse(&["spm", "sync"]).is_err());
+    assert!(parse(&["skillpm", "sync"]).is_err());
   }
 
   #[test]
   fn add_requires_a_source() {
-    assert!(parse(&["spm", "add", "--target", ".claude/skills/x"]).is_err());
+    assert!(parse(&["skillpm", "add", "--target", ".claude/skills/x"]).is_err());
   }
 
   #[test]
   fn add_requires_at_least_one_target() {
-    assert!(parse(&["spm", "add", "github:anthropics/skills/frontend-design"]).is_err());
+    assert!(parse(&["skillpm", "add", "github:anthropics/skills/frontend-design"]).is_err());
   }
 
   #[test]
   fn add_rejects_a_bare_ref_flag() {
     assert!(
       parse(&[
-        "spm",
+        "skillpm",
         "add",
         "github:a/b",
         "--target",
@@ -185,32 +185,32 @@ mod tests {
 
   #[test]
   fn remove_requires_a_name() {
-    assert!(parse(&["spm", "remove"]).is_err());
+    assert!(parse(&["skillpm", "remove"]).is_err());
   }
 
   #[test]
   fn remove_rejects_extra_names() {
-    assert!(parse(&["spm", "remove", "one", "two"]).is_err());
+    assert!(parse(&["skillpm", "remove", "one", "two"]).is_err());
   }
 
   #[test]
   fn install_rejects_selective_arguments() {
-    assert!(parse(&["spm", "install", "frontend-design"]).is_err());
+    assert!(parse(&["skillpm", "install", "frontend-design"]).is_err());
   }
 
   #[test]
   fn update_rejects_selective_arguments() {
-    assert!(parse(&["spm", "update", "frontend-design"]).is_err());
+    assert!(parse(&["skillpm", "update", "frontend-design"]).is_err());
   }
 
   #[test]
   fn unsupported_flags_are_rejected() {
     // v1 has no config override, force, JSON, quiet, or prompt options
-    assert!(parse(&["spm", "--config", "spm.toml", "install"]).is_err());
-    assert!(parse(&["spm", "install", "--json"]).is_err());
-    assert!(parse(&["spm", "update", "--quiet"]).is_err());
-    assert!(parse(&["spm", "add", "skills/x", "--target", "t/x", "--force"]).is_err());
-    assert!(parse(&["spm", "remove", "x", "--force"]).is_err());
-    assert!(parse(&["spm", "install", "--ref", "main"]).is_err());
+    assert!(parse(&["skillpm", "--config", "skillpm.toml", "install"]).is_err());
+    assert!(parse(&["skillpm", "install", "--json"]).is_err());
+    assert!(parse(&["skillpm", "update", "--quiet"]).is_err());
+    assert!(parse(&["skillpm", "add", "skills/x", "--target", "t/x", "--force"]).is_err());
+    assert!(parse(&["skillpm", "remove", "x", "--force"]).is_err());
+    assert!(parse(&["skillpm", "install", "--ref", "main"]).is_err());
   }
 }

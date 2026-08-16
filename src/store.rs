@@ -199,7 +199,7 @@ impl Store {
     match structural_dir_state(&self.sha256_dir()) {
       Ok(DirState::Present) => prune_dir(&self.sha256_dir(), &mut warnings, |name| {
         if !is_lower_hex64(name) {
-          // not something spm wrote; leave it alone
+          // not something skillpm wrote; leave it alone
           return false;
         }
         !referenced.contains(&format!("sha256:{name}"))
@@ -547,7 +547,7 @@ mod tests {
     fs::create_dir_all(abandoned.join("deep")).unwrap();
     fs::write(abandoned.join("deep/file"), "x").unwrap();
 
-    // an entry spm did not write stays untouched
+    // an entry skillpm did not write stays untouched
     let foreign = fixture.store.sha256_dir().join("not-a-hash");
     fs::create_dir(&foreign).unwrap();
 

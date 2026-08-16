@@ -5,14 +5,14 @@ status: done
 
 # Goal
 
-Read, validate, and surgically edit the global human-authored `spm.toml`.
+Read, validate, and surgically edit the global human-authored `skillpm.toml`.
 
 # Scope
 
 - Add strict version-1 config and skill models with `source`, optional `ref`, and nonempty `targets`.
 - Reject unknown fields, duplicate/empty targets, unsupported versions, and structurally invalid TOML.
 - Use a TOML document editor so add/remove operations preserve comments, ordering, and unrelated formatting.
-- Support a symlinked `spm.toml`: resolve and atomically update the real file without replacing the symlink.
+- Support a symlinked `skillpm.toml`: resolve and atomically update the real file without replacing the symlink.
 - Record original bytes for pre-commit external-change detection.
 - Provide creation of a canonical empty version-1 config for first `add` and after the last removal.
 

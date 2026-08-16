@@ -21,7 +21,7 @@ pub struct ResolvedTarget {
 }
 
 /// Validates the complete target graph before any command mutates anything.
-/// `protected` is spm's own territory: the config directory and data root.
+/// `protected` is skillpm's own territory: the config directory and data root.
 pub fn plan_targets(
   config: &Config,
   home: &Path,
@@ -77,13 +77,13 @@ pub fn plan_targets(
     }
   }
 
-  // spm's own directories
+  // skillpm's own directories
   for guarded in protected {
     let guarded = canonicalize_existing_prefix(guarded)?;
     for target in &targets {
       if overlaps(&target.canonical, &guarded) {
         bail!(
-          "target '{}' (skill '{}') overlaps spm's own directory '{}'",
+          "target '{}' (skill '{}') overlaps skillpm's own directory '{}'",
           target.canonical.display(),
           target.skill,
           guarded.display()
@@ -261,8 +261,8 @@ mod tests {
   impl World {
     fn protected(&self) -> Vec<PathBuf> {
       vec![
-        self.home.join(".config/spm"),
-        self.home.join(".local/share/spm"),
+        self.home.join(".config/skillpm"),
+        self.home.join(".local/share/skillpm"),
       ]
     }
 
@@ -357,26 +357,26 @@ mod tests {
   }
 
   #[test]
-  fn spm_directories_are_protected() {
+  fn skillpm_directories_are_protected() {
     let world = world();
 
     // inside the data root
     let error = world
-      .plan(&[("x", "github:o/r/x", &[".local/share/spm/store/x"])])
+      .plan(&[("x", "github:o/r/x", &[".local/share/skillpm/store/x"])])
       .unwrap_err();
-    assert!(error.to_string().contains("spm's own directory"));
+    assert!(error.to_string().contains("skillpm's own directory"));
 
-    // the config dir itself (a skill named "spm" targeting it)
+    // the config dir itself (a skill named "skillpm" targeting it)
     let error = world
-      .plan(&[("spm", "github:o/r/spm", &[".config/spm"])])
+      .plan(&[("skillpm", "github:o/r/skillpm", &[".config/skillpm"])])
       .unwrap_err();
-    assert!(error.to_string().contains("spm's own directory"));
+    assert!(error.to_string().contains("skillpm's own directory"));
 
     // an ancestor of the data root
     let error = world
       .plan(&[("share", "github:o/r/share", &[".local/share"])])
       .unwrap_err();
-    assert!(error.to_string().contains("spm's own directory"));
+    assert!(error.to_string().contains("skillpm's own directory"));
   }
 
   #[test]
@@ -474,7 +474,7 @@ mod tests {
     // simulate a prior install: both targets are symlinks into the store
     let snapshot = world
       .home
-      .join(".local/share/spm/store/sha256")
+      .join(".local/share/skillpm/store/sha256")
       .join("a".repeat(64));
     fs::create_dir_all(&snapshot).unwrap();
     for parent in ["one", "two"] {

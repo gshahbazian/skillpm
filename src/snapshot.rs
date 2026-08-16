@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 /// Version and domain prefix of the canonical hash input. Bump only with a
 /// snapshot format change; every stored hash depends on it.
-const HASH_DOMAIN: &[u8] = b"spm snapshot v1\n";
+const HASH_DOMAIN: &[u8] = b"skillpm snapshot v1\n";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GitFilter {
@@ -334,10 +334,10 @@ mod tests {
   }
 
   const GOLDEN_EMPTY: &str =
-    "sha256:3fef2482d0025e9aad92e3359b9d950196e42373f47933c60f6ff2baf032e438";
+    "sha256:6d55a28be0ad1cb1860b74732cc5c969e98d808f0e45795cb35924d6599d57a0";
   #[cfg(unix)]
   const GOLDEN_FIXTURE: &str =
-    "sha256:abcf59c152b671d51a2de23100f7f6f6d6fd2be8455ec928e15c635b606962f3";
+    "sha256:780823fb44e3cb04dcd209f11d1b9845a187d710ee36dea63a5e0e49ea0343dc";
 
   #[test]
   fn golden_empty_tree() {

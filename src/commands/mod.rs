@@ -45,12 +45,12 @@ pub fn run(command: Command) -> Result<()> {
 /// Every command takes the single nonblocking lock before reading state.
 /// The data root is a disposable cache: when a config already exists it may
 /// be recreated by any command; only a truly fresh machine (no config) is
-/// sent to `spm add`.
+/// sent to `skillpm add`.
 pub(crate) fn acquire_lock(paths: &Paths) -> Result<OperationLock> {
   if !paths.data_root.is_dir() {
     if !paths.config_file.exists() {
       bail!(
-        "spm has not been set up yet (missing {}); run `spm add` to install a first skill",
+        "skillpm has not been set up yet (missing {}); run `skillpm add` to install a first skill",
         paths.config_file.display()
       );
     }

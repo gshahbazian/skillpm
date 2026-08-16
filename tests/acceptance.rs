@@ -1,4 +1,4 @@
-//! Black-box acceptance suite: drives the released `spm` binary across real
+//! Black-box acceptance suite: drives the released `skillpm` binary across real
 //! process and filesystem boundaries with isolated HOME roots and local
 //! GitHub-style remotes (reached through an isolated git global config that
 //! rewrites https://github.com/ via url.insteadOf — the production URL path).
@@ -50,19 +50,19 @@ impl Sandbox {
   }
 
   fn config_path(&self) -> PathBuf {
-    self.home().join(".config/spm/spm.toml")
+    self.home().join(".config/skillpm/skillpm.toml")
   }
 
   fn lock_path(&self) -> PathBuf {
-    self.home().join(".config/spm/spm.lock")
+    self.home().join(".config/skillpm/skillpm.lock")
   }
 
   fn store_path(&self) -> PathBuf {
-    self.home().join(".local/share/spm/store")
+    self.home().join(".local/share/skillpm/store")
   }
 
   /// Writes an isolated git global config that rewrites https://github.com/
-  /// to a local file:// base — spm's git children exercise the production
+  /// to a local file:// base — skillpm's git children exercise the production
   /// URL path, and the host's real global config is never consulted.
   fn redirect_github_to(&self, base_root: &Path) {
     fs::write(
@@ -79,8 +79,8 @@ impl Sandbox {
     self.root.path().join("gitconfig")
   }
 
-  fn spm_with(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_spm"));
+  fn skillpm_with(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_skillpm"));
     command
       .args(args)
       .env("HOME", self.home())
@@ -97,22 +97,22 @@ impl Sandbox {
     for (key, value) in env {
       command.env(key, value);
     }
-    command.output().expect("failed to run spm")
+    command.output().expect("failed to run skillpm")
   }
 
-  fn spm(&self, args: &[&str]) -> Output {
-    self.spm_with(args, &[])
+  fn skillpm(&self, args: &[&str]) -> Output {
+    self.skillpm_with(args, &[])
   }
 
   /// Success is required; returns (stdout, stderr). The stdout contract is
   /// one concise summary line.
   fn ok(&self, args: &[&str]) -> (String, String) {
-    let output = self.spm(args);
+    let output = self.skillpm(args);
     let stdout = String::from_utf8(output.stdout).unwrap();
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(
       output.status.success(),
-      "spm {args:?} failed:\nstdout: {stdout}\nstderr: {stderr}"
+      "skillpm {args:?} failed:\nstdout: {stdout}\nstderr: {stderr}"
     );
     assert_eq!(
       stdout.lines().count(),
@@ -128,10 +128,10 @@ impl Sandbox {
 
   /// Failure is required; returns stderr and asserts stdout stayed clean.
   fn err(&self, args: &[&str]) -> String {
-    let output = self.spm(args);
+    let output = self.skillpm(args);
     assert!(
       !output.status.success(),
-      "spm {args:?} unexpectedly succeeded"
+      "skillpm {args:?} unexpectedly succeeded"
     );
     assert!(
       output.stdout.is_empty(),
@@ -310,7 +310,7 @@ fn install_is_offline_with_a_populated_store() {
   // PATH without git: any git spawn would fail loudly
   let empty = sandbox.root.path().join("empty-path");
   fs::create_dir(&empty).unwrap();
-  let output = sandbox.spm_with(&["install"], &[("PATH", empty.to_str().unwrap())]);
+  let output = sandbox.skillpm_with(&["install"], &[("PATH", empty.to_str().unwrap())]);
   assert!(
     output.status.success(),
     "offline install failed: {}",
@@ -334,7 +334,7 @@ fn cache_deletion_reconstructs_exact_locked_versions() {
   ]);
 
   // wipe the disposable cache entirely AND advance the remote
-  force_remove(&sandbox.home().join(".local/share/spm"));
+  force_remove(&sandbox.home().join(".local/share/skillpm"));
   push_commit(&work, &bare, "skills/gh-skill/new.md", "added later\n");
 
   sandbox.ok(&["install"]);
@@ -424,7 +424,7 @@ fn strict_validation_rejects_bad_input() {
   // stale lock: install/add/remove demand freshness
   fs::write(sandbox.lock_path(), "version = 1\n").unwrap();
   let stderr = sandbox.err(&["install"]);
-  assert!(stderr.contains("run `spm update`"), "{stderr}");
+  assert!(stderr.contains("run `skillpm update`"), "{stderr}");
 }
 
 #[test]
@@ -484,7 +484,7 @@ fn comments_and_symlinked_configs_survive() {
   sandbox.write_skill("skills/skill-two", "skill-two");
 
   // the global config is a symlink to a dotfiles-style location
-  let dotfiles = sandbox.home().join("dotfiles/spm.toml");
+  let dotfiles = sandbox.home().join("dotfiles/skillpm.toml");
   fs::create_dir_all(dotfiles.parent().unwrap()).unwrap();
   fs::write(&dotfiles, "# managed in dotfiles\nversion = 1\n").unwrap();
   fs::create_dir_all(sandbox.config_path().parent().unwrap()).unwrap();
@@ -516,13 +516,14 @@ fn concurrent_commands_are_excluded() {
   sandbox.write_skill("skills/local-skill", "local-skill");
   sandbox.ok(&["add", "skills/local-skill", "--target", "links/local-skill"]);
 
-  // this test process plays the role of a second spm holding the lock
-  let lock_file = fs::File::open(sandbox.home().join(".local/share/spm/.operation.lock")).unwrap();
+  // this test process plays the role of a second skillpm holding the lock
+  let lock_file =
+    fs::File::open(sandbox.home().join(".local/share/skillpm/.operation.lock")).unwrap();
   lock_file.try_lock().unwrap();
 
   let stderr = sandbox.err(&["update"]);
   assert!(
-    stderr.contains("another spm process is already running"),
+    stderr.contains("another skillpm process is already running"),
     "{stderr}"
   );
 }
@@ -540,11 +541,11 @@ fn git_timeouts_fail_fast_and_clean() {
   fs::set_permissions(shim_dir.join("git"), fs::Permissions::from_mode(0o755)).unwrap();
 
   let start = Instant::now();
-  let output = sandbox.spm_with(
+  let output = sandbox.skillpm_with(
     &["add", "github:owner/repo/skills/x", "--target", "links/x"],
     &[
       ("PATH", shim_dir.to_str().unwrap()),
-      ("SPM_GIT_TIMEOUT_SECONDS", "1"),
+      ("SKILLPM_GIT_TIMEOUT_SECONDS", "1"),
     ],
   );
   assert!(!output.status.success());
@@ -606,12 +607,12 @@ fn global_lookup_ignores_the_working_directory() {
   let decoy_dir = sandbox.root.path().join("project");
   fs::create_dir(&decoy_dir).unwrap();
   fs::write(
-    decoy_dir.join("spm.toml"),
+    decoy_dir.join("skillpm.toml"),
     "version = 1\n[skills.x]\nsource = \"s/x\"\ntargets = [\"t/x\"]\n",
   )
   .unwrap();
 
-  let output = Command::new(env!("CARGO_BIN_EXE_spm"))
+  let output = Command::new(env!("CARGO_BIN_EXE_skillpm"))
     .args(["update"])
     .current_dir(&decoy_dir)
     .env("HOME", sandbox.home())
@@ -623,7 +624,7 @@ fn global_lookup_ignores_the_working_directory() {
   assert!(!output.status.success());
   let stderr = String::from_utf8(output.stderr).unwrap();
   assert!(
-    stderr.contains("run `spm add`"),
+    stderr.contains("run `skillpm add`"),
     "the cwd config must be ignored: {stderr}"
   );
 }
@@ -632,7 +633,7 @@ fn global_lookup_ignores_the_working_directory() {
 fn help_matches_the_documented_v1_surface() {
   let sandbox = sandbox();
 
-  let output = sandbox.spm(&["--help"]);
+  let output = sandbox.skillpm(&["--help"]);
   assert!(output.status.success());
   let help = String::from_utf8(output.stdout).unwrap();
   for command in ["install", "update", "add", "remove"] {
@@ -649,7 +650,7 @@ fn help_matches_the_documented_v1_surface() {
     );
   }
 
-  let output = sandbox.spm(&["add", "--help"]);
+  let output = sandbox.skillpm(&["add", "--help"]);
   let add_help = String::from_utf8(output.stdout).unwrap();
   assert!(add_help.contains("--target"));
   assert!(add_help.contains("--ref"));

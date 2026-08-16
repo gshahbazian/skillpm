@@ -36,7 +36,7 @@ impl fmt::Display for InstallSummary {
   }
 }
 
-/// Reproduces spm.lock exactly: no version resolution, no metadata writes,
+/// Reproduces skillpm.lock exactly: no version resolution, no metadata writes,
 /// and no network unless a locked snapshot is missing or corrupt.
 pub(crate) fn execute(env: &CommandEnv) -> Result<InstallSummary> {
   let paths = &env.paths;
@@ -94,10 +94,10 @@ pub(crate) fn execute(env: &CommandEnv) -> Result<InstallSummary> {
 
   // re-read metadata bytes immediately before committing (README section 10)
   if config_doc.externally_modified()? {
-    bail!("spm.toml changed while spm was running; aborting without changes");
+    bail!("skillpm.toml changed while skillpm was running; aborting without changes");
   }
   if lock_doc.externally_modified()? {
-    bail!("spm.lock changed while spm was running; aborting without changes");
+    bail!("skillpm.lock changed while skillpm was running; aborting without changes");
   }
 
   transaction.commit()?;
@@ -324,7 +324,7 @@ targets = ["links/gh-skill", "links2/gh-skill"]
       .write_config(&CONFIG.replace("ref = \"main\"", "ref = \"other\""));
 
     let error = execute(&fixture.world.offline_env()).unwrap_err();
-    assert!(error.to_string().contains("run `spm update`"));
+    assert!(error.to_string().contains("run `skillpm update`"));
   }
 
   #[test]
@@ -404,6 +404,6 @@ targets = ["links/gh-skill", "links2/gh-skill"]
   fn an_unbootstrapped_machine_gets_a_clear_error() {
     let world = testutil::world();
     let error = execute(&world.offline_env()).unwrap_err();
-    assert!(error.to_string().contains("run `spm add`"));
+    assert!(error.to_string().contains("run `skillpm add`"));
   }
 }

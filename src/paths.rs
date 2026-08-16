@@ -27,13 +27,13 @@ impl Paths {
   }
 
   fn new(home: &Path, xdg_config: Option<&OsStr>, xdg_data: Option<&OsStr>) -> Self {
-    let config_dir = base_dir(home, xdg_config, &[".config"]).join("spm");
-    let data_root = base_dir(home, xdg_data, &[".local", "share"]).join("spm");
+    let config_dir = base_dir(home, xdg_config, &[".config"]).join("skillpm");
+    let data_root = base_dir(home, xdg_data, &[".local", "share"]).join("skillpm");
 
     Self {
       home: home.to_path_buf(),
-      config_file: config_dir.join("spm.toml"),
-      lockfile: config_dir.join("spm.lock"),
+      config_file: config_dir.join("skillpm.toml"),
+      lockfile: config_dir.join("skillpm.lock"),
       store: data_root.join("store"),
       operation_lock: data_root.join(".operation.lock"),
       data_root,
@@ -211,7 +211,7 @@ pub struct OperationLock {
 }
 
 impl OperationLock {
-  /// Nonblocking: fails immediately if another spm process holds the lock.
+  /// Nonblocking: fails immediately if another skillpm process holds the lock.
   pub fn acquire(lock_path: &Path) -> Result<Self> {
     let mut options = fs::OpenOptions::new();
     options.create(true).write(true).truncate(false);
@@ -229,7 +229,7 @@ impl OperationLock {
     match file.try_lock() {
       Ok(()) => Ok(Self { _file: file }),
       Err(TryLockError::WouldBlock) => bail!(
-        "another spm process is already running (operation lock {} is held)",
+        "another skillpm process is already running (operation lock {} is held)",
         lock_path.display()
       ),
       Err(TryLockError::Error(error)) => {
@@ -251,13 +251,16 @@ mod tests {
   fn default_layout_lives_under_home() {
     let paths = Paths::new(&home(), None, None);
 
-    assert_eq!(paths.config_file, home().join(".config/spm/spm.toml"));
-    assert_eq!(paths.lockfile, home().join(".config/spm/spm.lock"));
-    assert_eq!(paths.data_root, home().join(".local/share/spm"));
-    assert_eq!(paths.store, home().join(".local/share/spm/store"));
+    assert_eq!(
+      paths.config_file,
+      home().join(".config/skillpm/skillpm.toml")
+    );
+    assert_eq!(paths.lockfile, home().join(".config/skillpm/skillpm.lock"));
+    assert_eq!(paths.data_root, home().join(".local/share/skillpm"));
+    assert_eq!(paths.store, home().join(".local/share/skillpm/store"));
     assert_eq!(
       paths.operation_lock,
-      home().join(".local/share/spm/.operation.lock")
+      home().join(".local/share/skillpm/.operation.lock")
     );
   }
 
@@ -269,25 +272,37 @@ mod tests {
       Some(OsStr::new("/xdg/data")),
     );
 
-    assert_eq!(paths.config_file, PathBuf::from("/xdg/config/spm/spm.toml"));
-    assert_eq!(paths.lockfile, PathBuf::from("/xdg/config/spm/spm.lock"));
-    assert_eq!(paths.data_root, PathBuf::from("/xdg/data/spm"));
-    assert_eq!(paths.store, PathBuf::from("/xdg/data/spm/store"));
+    assert_eq!(
+      paths.config_file,
+      PathBuf::from("/xdg/config/skillpm/skillpm.toml")
+    );
+    assert_eq!(
+      paths.lockfile,
+      PathBuf::from("/xdg/config/skillpm/skillpm.lock")
+    );
+    assert_eq!(paths.data_root, PathBuf::from("/xdg/data/skillpm"));
+    assert_eq!(paths.store, PathBuf::from("/xdg/data/skillpm/store"));
     assert_eq!(
       paths.operation_lock,
-      PathBuf::from("/xdg/data/spm/.operation.lock")
+      PathBuf::from("/xdg/data/skillpm/.operation.lock")
     );
   }
 
   #[test]
   fn relative_or_empty_xdg_values_fall_back_to_defaults() {
     let relative = Paths::new(&home(), Some(OsStr::new("cfg")), Some(OsStr::new("data")));
-    assert_eq!(relative.config_file, home().join(".config/spm/spm.toml"));
-    assert_eq!(relative.data_root, home().join(".local/share/spm"));
+    assert_eq!(
+      relative.config_file,
+      home().join(".config/skillpm/skillpm.toml")
+    );
+    assert_eq!(relative.data_root, home().join(".local/share/skillpm"));
 
     let empty = Paths::new(&home(), Some(OsStr::new("")), Some(OsStr::new("")));
-    assert_eq!(empty.config_file, home().join(".config/spm/spm.toml"));
-    assert_eq!(empty.data_root, home().join(".local/share/spm"));
+    assert_eq!(
+      empty.config_file,
+      home().join(".config/skillpm/skillpm.toml")
+    );
+    assert_eq!(empty.data_root, home().join(".local/share/skillpm"));
   }
 
   #[test]
@@ -386,7 +401,7 @@ mod tests {
     // flock treats separately opened descriptors independently, so this
     // models a second process
     let error = OperationLock::acquire(&lock_path).unwrap_err();
-    assert!(error.to_string().contains("another spm process"));
+    assert!(error.to_string().contains("another skillpm process"));
 
     drop(held);
 
