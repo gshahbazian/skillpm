@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod config;
+mod github;
 mod local;
 mod lockfile;
 mod output;

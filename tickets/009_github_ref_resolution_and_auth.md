@@ -1,6 +1,6 @@
 ---
 name: GitHub ref resolution and authentication
-status: pending
+status: done
 ---
 
 # Goal
