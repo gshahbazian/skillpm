@@ -132,6 +132,11 @@ mod tests {
   use crate::source::{GitHubSource, LocalSource};
   use crate::testutil::{self, World, make_remote, write_skill_md};
   use std::fs;
+
+  // shadows super::execute: absorbs transient test-only lock contention
+  fn execute(env: &CommandEnv) -> Result<InstallSummary> {
+    testutil::retry_lock(|| super::execute(env))
+  }
   use std::path::PathBuf;
 
   const CONFIG: &str = r#"version = 1

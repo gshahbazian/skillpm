@@ -84,6 +84,22 @@ impl World {
   }
 }
 
+/// Retries a command on transient operation-lock contention. Concurrently
+/// forked test subprocesses briefly inherit lock descriptors between fork and
+/// exec, so an acquire right after a release can spuriously see a held lock.
+/// Production is immune: each spm process holds the lock until it exits.
+pub(crate) fn retry_lock<T>(mut run: impl FnMut() -> anyhow::Result<T>) -> anyhow::Result<T> {
+  for _ in 0..100 {
+    match run() {
+      Err(error) if error.to_string().contains("another spm process") => {
+        std::thread::sleep(Duration::from_millis(10));
+      }
+      other => return other,
+    }
+  }
+  run()
+}
+
 pub(crate) fn write_skill_md(dir: &Path, name: &str) {
   fs::create_dir_all(dir).unwrap();
   fs::write(

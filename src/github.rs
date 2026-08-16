@@ -280,6 +280,9 @@ pub struct PreparedGitHubSkill {
   pub commit: String,
   pub content_hash: String,
   pub reused: bool,
+  /// Whether this preparation created the snapshot (vs deduplicating);
+  /// failed commands may clean up only created snapshots.
+  pub created: bool,
 }
 
 const MAX_CONCURRENT_GROUPS: usize = 4;
@@ -328,8 +331,37 @@ pub fn prepare_github_skills(
     }
   }
 
-  // phase 2: store commits, sequential and only after every group succeeded
+  let mut prepared = commit_phase(store, staged_groups)?;
+  prepared.sort_by(|a, b| a.key.cmp(&b.key));
+  Ok(prepared)
+}
+
+/// Phase 2: sequential store commits, run only after every group staged
+/// successfully. A mid-phase failure removes the snapshots this phase
+/// created — the caller never learns about a partially committed batch.
+fn commit_phase(
+  store: &Store,
+  staged_groups: Vec<StagedGroup>,
+) -> Result<Vec<PreparedGitHubSkill>> {
+  let mut created: Vec<String> = Vec::new();
+  match commit_staged(store, staged_groups, &mut created) {
+    Ok(prepared) => Ok(prepared),
+    Err(error) => {
+      for hash in &created {
+        let _ = store.remove_snapshot(hash);
+      }
+      Err(error)
+    }
+  }
+}
+
+fn commit_staged(
+  store: &Store,
+  staged_groups: Vec<StagedGroup>,
+  created: &mut Vec<String>,
+) -> Result<Vec<PreparedGitHubSkill>> {
   let mut prepared = Vec::new();
+
   for group in staged_groups {
     for skill in group.skills {
       match skill.outcome {
@@ -342,10 +374,16 @@ pub fn prepare_github_skills(
             commit: skill.commit,
             content_hash,
             reused: true,
+            created: false,
           });
         }
         StagedOutcome::Fresh { tree } => {
           let committed = store.commit_tree(&tree)?;
+          // recorded before the metadata read, so an invalid snapshot is
+          // cleaned up too
+          if committed.created {
+            created.push(committed.content_hash.clone());
+          }
           let (name, description) = metadata_from_snapshot(store, &committed.content_hash)?;
           prepared.push(PreparedGitHubSkill {
             key: skill.key,
@@ -354,13 +392,13 @@ pub fn prepare_github_skills(
             commit: skill.commit,
             content_hash: committed.content_hash,
             reused: false,
+            created: committed.created,
           });
         }
       }
     }
   }
 
-  prepared.sort_by(|a, b| a.key.cmp(&b.key));
   Ok(prepared)
 }
 
@@ -1589,6 +1627,51 @@ exec git "$@""#,
     assert_eq!(
       logged.trim(),
       "1 -c core.attributesfile= -c core.autocrlf=false ls-tree HEAD"
+    );
+  }
+
+  #[test]
+  fn partial_phase_two_failures_clean_up_created_snapshots() {
+    // mid-phase-two failures need environmental faults (disk full, perms),
+    // so drive the phase directly: skill A commits, then skill B's tree
+    // fails to materialize because its staging source vanished
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::new(&temp.path().join("store"));
+
+    let dir_a = temp.path().join("a");
+    write_skill_md(&dir_a, "skill-a");
+    let tree_a = snapshot::scan_tree(&dir_a, GitFilter::IncludeAll).unwrap();
+
+    let dir_b = temp.path().join("b");
+    write_skill_md(&dir_b, "skill-b");
+    let tree_b = snapshot::scan_tree(&dir_b, GitFilter::IncludeAll).unwrap();
+    fs::remove_dir_all(&dir_b).unwrap();
+
+    let sha = "0123456789abcdef0123456789abcdef01234567".to_string();
+    let groups = vec![StagedGroup {
+      skills: vec![
+        StagedSkill {
+          key: "skill-a".into(),
+          commit: sha.clone(),
+          outcome: StagedOutcome::Fresh { tree: tree_a },
+        },
+        StagedSkill {
+          key: "skill-b".into(),
+          commit: sha,
+          outcome: StagedOutcome::Fresh { tree: tree_b },
+        },
+      ],
+      _temp: None,
+    }];
+
+    commit_phase(&store, groups).unwrap_err();
+
+    let leftovers = fs::read_dir(temp.path().join("store/sha256"))
+      .map(|dir| dir.count())
+      .unwrap_or(0);
+    assert_eq!(
+      leftovers, 0,
+      "skill-a's committed snapshot must not survive the failed batch"
     );
   }
 

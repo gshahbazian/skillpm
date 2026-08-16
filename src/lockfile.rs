@@ -149,6 +149,12 @@ impl UpdateLockDocument {
   pub fn externally_modified(&self) -> Result<bool> {
     on_disk_bytes_changed(&self.path, self.original.as_deref())
   }
+
+  /// The bytes as loaded (None: absent), for transactional expected-state
+  /// checks and skip-unchanged-write decisions.
+  pub fn original_bytes(&self) -> Option<&[u8]> {
+    self.original.as_deref()
+  }
 }
 
 /// For `update`: missing/malformed/older state regenerates from scratch, a
@@ -226,12 +232,11 @@ pub fn render(lockfile: &Lockfile) -> String {
   doc.to_string()
 }
 
-/// Atomic write at the logical global lock path via a temporary sibling.
-pub fn write_atomic(path: &Path, lockfile: &Lockfile) -> Result<()> {
+/// Renders and validates: round-trips through the strict read path so the
+/// write side can never persist state the read side would reject.
+pub fn render_validated(lockfile: &Lockfile) -> Result<Vec<u8>> {
   let rendered = render(lockfile);
 
-  // round-trip through the strict read path so the write side can never
-  // persist state the read side would reject
   match classify(rendered.as_bytes()) {
     LockState::Valid { lockfile: reparsed } if reparsed == *lockfile => {}
     LockState::Malformed { reason } => {
@@ -240,13 +245,20 @@ pub fn write_atomic(path: &Path, lockfile: &Lockfile) -> Result<()> {
     other => bail!("refusing to write an invalid lockfile: {other:?}"),
   }
 
+  Ok(rendered.into_bytes())
+}
+
+/// Atomic write at the logical global lock path via a temporary sibling.
+pub fn write_atomic(path: &Path, lockfile: &Lockfile) -> Result<()> {
+  let rendered = render_validated(lockfile)?;
+
   let parent = path
     .parent()
     .with_context(|| format!("lockfile {} has no parent directory", path.display()))?;
 
   let mut temp = tempfile::NamedTempFile::new_in(parent)
     .with_context(|| format!("failed to create temporary file in {}", parent.display()))?;
-  temp.write_all(rendered.as_bytes())?;
+  temp.write_all(&rendered)?;
 
   if let Ok(metadata) = fs::metadata(path) {
     temp.as_file().set_permissions(metadata.permissions())?;

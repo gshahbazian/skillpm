@@ -20,6 +20,9 @@ pub struct PreparedLocalSkill {
   pub description: String,
   pub content_hash: String,
   pub resolved_path: PathBuf,
+  /// Whether this preparation created the snapshot (vs reusing the store);
+  /// failed commands may clean up only created snapshots.
+  pub created: bool,
 }
 
 /// Validates, snapshots, and commits a local source. Reuses the store when
@@ -51,7 +54,7 @@ fn prepare_with_hook(
 
   // unchanged fast path: the store already holds this exact content
   if store.verify_snapshot(&source_hash)? == SnapshotStatus::Valid {
-    return prepared_from_snapshot(store, source_hash, resolved);
+    return prepared_from_snapshot(store, source_hash, resolved, false);
   }
 
   let committed = store.commit_tree(&tree)?;
@@ -72,7 +75,7 @@ fn prepare_with_hook(
     );
   }
 
-  prepared_from_snapshot(store, committed.content_hash, resolved)
+  prepared_from_snapshot(store, committed.content_hash, resolved, committed.created)
 }
 
 /// Metadata is read from the immutable, hash-verified snapshot — never the
@@ -82,6 +85,7 @@ fn prepared_from_snapshot(
   store: &Store,
   content_hash: String,
   resolved_path: PathBuf,
+  created: bool,
 ) -> Result<PreparedLocalSkill> {
   let snapshot_dir = store.snapshot_path(&content_hash)?;
   let metadata = match skill::load_skill_metadata(&snapshot_dir) {
@@ -97,6 +101,7 @@ fn prepared_from_snapshot(
     description: metadata.description,
     content_hash,
     resolved_path,
+    created,
   })
 }
 

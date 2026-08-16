@@ -21,7 +21,6 @@ fn spm(args: &[&str]) -> Output {
 #[test]
 fn stub_commands_fail_with_errors_on_stderr_only() {
   for args in [
-    vec!["update"],
     vec!["add", "skills/x", "--target", ".claude/skills/x"],
     vec!["remove", "x"],
   ] {
