@@ -1,17 +1,26 @@
 use std::process::{Command, Output};
 
-fn spm(args: &[&str]) -> Output {
+/// Every invocation runs against an isolated empty HOME so tests can never
+/// read or touch the developer's real spm state.
+fn spm_in(home: &std::path::Path, args: &[&str]) -> Output {
   Command::new(env!("CARGO_BIN_EXE_spm"))
     .args(args)
     .env("NO_COLOR", "1")
+    .env("HOME", home)
+    .env_remove("XDG_CONFIG_HOME")
+    .env_remove("XDG_DATA_HOME")
     .output()
     .expect("failed to run spm")
+}
+
+fn spm(args: &[&str]) -> Output {
+  let home = tempfile::tempdir().expect("failed to create temp home");
+  spm_in(home.path(), args)
 }
 
 #[test]
 fn stub_commands_fail_with_errors_on_stderr_only() {
   for args in [
-    vec!["install"],
     vec!["update"],
     vec!["add", "skills/x", "--target", ".claude/skills/x"],
     vec!["remove", "x"],
@@ -34,6 +43,21 @@ fn stub_commands_fail_with_errors_on_stderr_only() {
       "unexpected stderr for {args:?}: {stderr}"
     );
   }
+}
+
+#[test]
+fn install_on_a_fresh_home_reports_missing_setup() {
+  let output = spm(&["install"]);
+
+  assert!(!output.status.success());
+  assert!(output.stdout.is_empty());
+
+  let stderr = String::from_utf8(output.stderr).unwrap();
+  assert!(stderr.contains("error: "), "missing error prefix: {stderr}");
+  assert!(
+    stderr.contains("run `spm add`"),
+    "expected the bootstrap hint: {stderr}"
+  );
 }
 
 #[test]

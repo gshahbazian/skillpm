@@ -1,6 +1,6 @@
 ---
 name: Install command workflow
-status: pending
+status: done
 ---
 
 # Goal

@@ -13,6 +13,8 @@ mod snapshot;
 mod source;
 mod store;
 mod targets;
+#[cfg(test)]
+mod testutil;
 mod transaction;
 
 use std::process::ExitCode;
