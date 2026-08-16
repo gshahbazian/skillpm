@@ -19,6 +19,15 @@ pub enum SnapshotStatus {
   Corrupt,
 }
 
+/// Whether a commit created a new snapshot or deduplicated against an
+/// existing one. Failure cleanup must only ever remove created snapshots; a
+/// reused one may be referenced by other installed skills.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommitOutcome {
+  pub content_hash: String,
+  pub created: bool,
+}
+
 #[derive(Debug)]
 pub struct Store {
   root: PathBuf,
@@ -95,7 +104,7 @@ impl Store {
   /// Stages, re-scans, and atomically commits a snapshot of `source_tree`.
   /// The returned content hash is computed from the staged bytes — what the
   /// store actually holds — never from the source scan.
-  pub fn commit_tree(&self, source_tree: &SnapshotTree) -> Result<String> {
+  pub fn commit_tree(&self, source_tree: &SnapshotTree) -> Result<CommitOutcome> {
     for dir in [&self.root, &self.sha256_dir(), &self.staging_dir()] {
       structural_dir_state(dir)?;
       create_private_dir(dir).with_context(|| format!("failed to create {}", dir.display()))?;
@@ -121,7 +130,12 @@ impl Store {
     let destination = self.snapshot_path(&content_hash)?;
     match self.verify_snapshot(&content_hash)? {
       // deduplicate against an existing valid snapshot
-      SnapshotStatus::Valid => return Ok(content_hash),
+      SnapshotStatus::Valid => {
+        return Ok(CommitOutcome {
+          content_hash,
+          created: false,
+        });
+      }
       SnapshotStatus::Corrupt => {
         remove_tree(&destination)
           .with_context(|| format!("failed to remove corrupt {}", destination.display()))?;
@@ -144,7 +158,10 @@ impl Store {
       return Err(error);
     }
 
-    Ok(content_hash)
+    Ok(CommitOutcome {
+      content_hash,
+      created: true,
+    })
   }
 
   /// For reconstruction of corrupt snapshots; missing is fine.
@@ -367,9 +384,13 @@ mod tests {
     }
   }
 
-  fn commit(fixture: &Fixture) -> String {
+  fn commit_outcome(fixture: &Fixture) -> CommitOutcome {
     let tree = snapshot::scan_tree(&fixture.source, GitFilter::ExcludeGit).unwrap();
     fixture.store.commit_tree(&tree).unwrap()
+  }
+
+  fn commit(fixture: &Fixture) -> String {
+    commit_outcome(fixture).content_hash
   }
 
   #[cfg(unix)]
@@ -411,9 +432,14 @@ mod tests {
   #[test]
   fn commit_deduplicates_identical_content() {
     let fixture = fixture();
-    let first = commit(&fixture);
-    let second = commit(&fixture);
-    assert_eq!(first, second);
+    let first = commit_outcome(&fixture);
+    let second = commit_outcome(&fixture);
+    assert_eq!(first.content_hash, second.content_hash);
+
+    // failure cleanup keys off this: only a created snapshot may be removed,
+    // because a reused one may already be referenced by other skills
+    assert!(first.created, "first commit must report created");
+    assert!(!second.created, "deduplicated commit must report reused");
 
     let entries = fs::read_dir(fixture.store.sha256_dir()).unwrap().count();
     assert_eq!(entries, 1);
@@ -447,9 +473,11 @@ mod tests {
       SnapshotStatus::Corrupt
     );
 
-    // recommitting the source replaces the corrupt copy
-    let recommitted = commit(&fixture);
-    assert_eq!(recommitted, hash);
+    // recommitting the source replaces the corrupt copy, and the fresh
+    // replacement counts as created, not reused
+    let recommitted = commit_outcome(&fixture);
+    assert_eq!(recommitted.content_hash, hash);
+    assert!(recommitted.created);
     assert_eq!(
       fixture.store.verify_snapshot(&hash).unwrap(),
       SnapshotStatus::Valid
@@ -587,7 +615,7 @@ mod tests {
     fs::create_dir(&source).unwrap();
     fs::write(source.join("f"), "x").unwrap();
     let tree = snapshot::scan_tree(&source, GitFilter::ExcludeGit).unwrap();
-    let hash = store_at_real.commit_tree(&tree).unwrap();
+    let hash = store_at_real.commit_tree(&tree).unwrap().content_hash;
 
     let linked_root = temp.path().join("store");
     std::os::unix::fs::symlink(&real_store, &linked_root).unwrap();

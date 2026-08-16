@@ -1,6 +1,6 @@
 ---
 name: Local source snapshot preparation
-status: pending
+status: done
 ---
 
 # Goal
