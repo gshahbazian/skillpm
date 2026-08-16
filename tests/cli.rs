@@ -19,19 +19,26 @@ fn spm(args: &[&str]) -> Output {
 }
 
 #[test]
-fn stub_commands_fail_with_errors_on_stderr_only() {
-  // `remove` is the last remaining stub
-  let output = spm(&["remove", "x"]);
+fn commands_on_a_fresh_home_fail_with_errors_on_stderr_only() {
+  for args in [vec!["update"], vec!["remove", "x"]] {
+    let output = spm(&args);
 
-  assert!(!output.status.success());
-  assert!(output.stdout.is_empty(), "stdout must stay clean");
+    assert!(!output.status.success(), "expected failure for {args:?}");
+    assert!(
+      output.stdout.is_empty(),
+      "stdout must stay clean for {args:?}"
+    );
 
-  let stderr = String::from_utf8(output.stderr).unwrap();
-  assert!(stderr.contains("error: "), "missing error prefix: {stderr}");
-  assert!(
-    stderr.contains("not implemented"),
-    "unexpected stderr: {stderr}"
-  );
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(
+      stderr.contains("error: "),
+      "missing error prefix for {args:?}: {stderr}"
+    );
+    assert!(
+      stderr.contains("run `spm add`"),
+      "expected the bootstrap hint for {args:?}: {stderr}"
+    );
+  }
 }
 
 #[test]

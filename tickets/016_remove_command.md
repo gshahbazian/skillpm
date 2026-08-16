@@ -1,6 +1,6 @@
 ---
 name: Remove command workflow
-status: pending
+status: done
 ---
 
 # Goal

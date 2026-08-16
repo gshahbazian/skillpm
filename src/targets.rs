@@ -204,12 +204,16 @@ pub enum RemovalAction {
 }
 
 /// Preflights one target for removal. Only symlinks are ever unlinked; a
-/// regular file or directory aborts the whole removal.
+/// regular file or directory aborts the whole removal. Absent targets stage
+/// a commit-time re-verification, so an entry appearing mid-command aborts.
 pub fn stage_removal(transaction: &mut Transaction, target: &Path) -> Result<RemovalAction> {
   match entry_state(target)? {
-    EntryState::Absent => Ok(RemovalAction::AlreadyMissing),
+    EntryState::Absent => {
+      transaction.remove_symlink(target, ExpectedLink::Absent);
+      Ok(RemovalAction::AlreadyMissing)
+    }
     EntryState::Symlink(_) => {
-      transaction.remove_symlink(target);
+      transaction.remove_symlink(target, ExpectedLink::AnySymlink);
       Ok(RemovalAction::Unlink)
     }
     EntryState::Other => bail!(

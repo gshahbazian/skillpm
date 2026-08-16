@@ -50,6 +50,7 @@ enum Operation {
   },
   RemoveSymlink {
     path: PathBuf,
+    expected: ExpectedLink,
   },
 }
 
@@ -92,11 +93,13 @@ impl Transaction {
     });
   }
 
-  /// A missing link counts as already removed. Anything that is not a
-  /// symlink aborts the commit.
-  pub fn remove_symlink(&mut self, path: &Path) {
+  /// Removes a symlink, or (with ExpectedLink::Absent) merely re-verifies at
+  /// commit time that the planned-missing target is still missing. Anything
+  /// that is not a symlink aborts the commit.
+  pub fn remove_symlink(&mut self, path: &Path, expected: ExpectedLink) {
     self.operations.push(Operation::RemoveSymlink {
       path: path.to_path_buf(),
+      expected,
     });
   }
 
@@ -192,17 +195,28 @@ fn apply(operation: &Operation, undos: &mut Vec<Undo>) -> Result<()> {
       set_symlink_atomic(path, destination)
     }
 
-    Operation::RemoveSymlink { path } => match link_state(path)? {
-      LinkState::Absent => Ok(()), // already removed
-      LinkState::Symlink(prior) => {
-        undos.push(Undo::RestoreLink {
-          path: path.clone(),
-          destination: prior,
-        });
-        fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))
+    Operation::RemoveSymlink { path, expected } => {
+      match (expected, link_state(path)?) {
+        // planned unlink; a link that vanished meanwhile is already removed
+        (ExpectedLink::AnySymlink, LinkState::Absent) => Ok(()),
+        (ExpectedLink::AnySymlink, LinkState::Symlink(prior)) => {
+          undos.push(Undo::RestoreLink {
+            path: path.clone(),
+            destination: prior,
+          });
+          fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))
+        }
+        // planned-missing target: re-verified at commit, never touched
+        (ExpectedLink::Absent, LinkState::Absent) => Ok(()),
+        (ExpectedLink::Absent, LinkState::Symlink(_)) => bail!(
+          "{} changed since it was planned; aborting without changes",
+          path.display()
+        ),
+        (_, LinkState::Other) => {
+          bail!("{} is not a symlink; refusing to remove it", path.display())
+        }
       }
-      LinkState::Other => bail!("{} is not a symlink; refusing to remove it", path.display()),
-    },
+    }
   }
 }
 
@@ -544,7 +558,7 @@ mod tests {
     let world = world();
 
     let mut tx = Transaction::new();
-    tx.remove_symlink(&world.old_link());
+    tx.remove_symlink(&world.old_link(), ExpectedLink::AnySymlink);
     tx.write_file(&world.config(), b"x".to_vec(), ExpectedFile::Absent); // fails: file exists
 
     tx.commit().unwrap_err();
@@ -558,15 +572,52 @@ mod tests {
   fn removing_a_missing_symlink_is_accepted() {
     let world = world();
     let mut tx = Transaction::new();
-    tx.remove_symlink(&world.root().join("targets/never-existed"));
+    tx.remove_symlink(
+      &world.root().join("targets/never-existed"),
+      ExpectedLink::Absent,
+    );
     tx.commit().unwrap();
+  }
+
+  #[test]
+  fn planned_missing_removals_recheck_at_commit() {
+    let world = world();
+    let planned_missing = world.root().join("targets/was-missing");
+
+    let mut tx = Transaction::new();
+    tx.remove_symlink(&world.old_link(), ExpectedLink::AnySymlink);
+    tx.remove_symlink(&planned_missing, ExpectedLink::Absent);
+
+    // a regular file appears at the planned-missing target before commit
+    fs::write(&planned_missing, "user data").unwrap();
+
+    let error = tx.commit().unwrap_err();
+    assert!(error.to_string().contains("refusing to remove"));
+
+    // the earlier unlink was rolled back and the new file is untouched
+    assert_eq!(
+      read_link(&world.old_link()),
+      PathBuf::from("/store/old-snapshot")
+    );
+    assert_eq!(fs::read_to_string(&planned_missing).unwrap(), "user data");
+
+    // a link appearing where none was planned aborts too
+    let mut tx = Transaction::new();
+    tx.remove_symlink(&world.root().join("targets/surprise"), ExpectedLink::Absent);
+    std::os::unix::fs::symlink("/somewhere", world.root().join("targets/surprise")).unwrap();
+    let error = tx.commit().unwrap_err();
+    assert!(error.to_string().contains("changed since it was planned"));
+    assert!(
+      fs::symlink_metadata(world.root().join("targets/surprise")).is_ok(),
+      "the surprise link must not be unlinked"
+    );
   }
 
   #[test]
   fn removing_a_non_symlink_is_refused() {
     let world = world();
     let mut tx = Transaction::new();
-    tx.remove_symlink(&world.config());
+    tx.remove_symlink(&world.config(), ExpectedLink::AnySymlink);
 
     let error = tx.commit().unwrap_err();
     assert!(error.to_string().contains("refusing to remove"));
@@ -673,7 +724,7 @@ mod tests {
       b"new config".to_vec(),
       ExpectedFile::Bytes(b"old config".to_vec()),
     );
-    tx.remove_symlink(&world.config()); // fails: spm.toml is a regular file
+    tx.remove_symlink(&world.config(), ExpectedLink::AnySymlink); // fails: spm.toml is a regular file
     tx.commit().unwrap_err();
     assert_still_linked(&world);
     assert_eq!(fs::read(&real).unwrap(), b"old config");
