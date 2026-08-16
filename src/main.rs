@@ -12,6 +12,7 @@ mod skill;
 mod snapshot;
 mod source;
 mod store;
+mod transaction;
 
 use std::process::ExitCode;
 

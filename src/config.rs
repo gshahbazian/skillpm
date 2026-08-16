@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use toml_edit::{Array, DocumentMut, Item, Table, value};
 
-use crate::paths::canonicalize_existing_prefix;
+use crate::paths::{canonicalize_existing_prefix, resolve_real_path};
 
 pub const CONFIG_VERSION: i64 = 1;
 
@@ -183,31 +183,6 @@ impl ConfigDocument {
       }
     }
   }
-}
-
-/// Follows a symlink chain even when the final target does not exist yet,
-/// which plain canonicalize reports as NotFound.
-fn resolve_real_path(path: &Path) -> Result<PathBuf> {
-  let mut current = path.to_path_buf();
-
-  // 40 matches the Linux kernel's symlink-following limit
-  for _ in 0..40 {
-    let Ok(destination) = fs::read_link(&current) else {
-      // not a symlink (or nothing there at all)
-      return canonicalize_existing_prefix(&current);
-    };
-
-    current = if destination.is_absolute() {
-      destination
-    } else {
-      current
-        .parent()
-        .unwrap_or_else(|| Path::new(""))
-        .join(destination)
-    };
-  }
-
-  bail!("too many levels of symbolic links at {}", path.display());
 }
 
 fn targets_array(targets: &[PathBuf]) -> Result<Item> {

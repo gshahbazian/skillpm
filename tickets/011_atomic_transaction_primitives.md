@@ -1,6 +1,6 @@
 ---
 name: Atomic transaction primitives
-status: pending
+status: done
 ---
 
 # Goal
