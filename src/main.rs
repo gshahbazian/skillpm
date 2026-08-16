@@ -6,6 +6,7 @@ mod output;
 mod paths;
 mod platform;
 mod skill;
+mod snapshot;
 mod source;
 
 use std::process::ExitCode;

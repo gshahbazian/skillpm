@@ -1,6 +1,6 @@
 ---
 name: Canonical snapshot hashing and tree validation
-status: pending
+status: done
 ---
 
 # Goal
