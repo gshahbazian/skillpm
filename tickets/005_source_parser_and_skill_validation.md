@@ -1,6 +1,6 @@
 ---
 name: Source parsing and skill validation
-status: pending
+status: done
 ---
 
 # Goal

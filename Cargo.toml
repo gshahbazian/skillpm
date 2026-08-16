@@ -8,6 +8,7 @@ anyhow = "1.0.104"
 clap = { version = "4.6.6", features = ["derive"] }
 tempfile = "3.27.0"
 toml_edit = "0.25.13"
+yaml-rust2 = "0.11.0"
 
 [lints.rust]
 unsafe_code = "deny"

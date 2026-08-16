@@ -5,6 +5,8 @@ mod lockfile;
 mod output;
 mod paths;
 mod platform;
+mod skill;
+mod source;
 
 use std::process::ExitCode;
 
