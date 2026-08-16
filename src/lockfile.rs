@@ -1,5 +1,3 @@
-#![allow(dead_code)] // consumed by the command tickets
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
@@ -58,6 +56,7 @@ pub struct LockfileDocument {
   original: Option<Vec<u8>>,
 }
 
+#[cfg_attr(not(test), allow(dead_code))] // commands use the two gates below
 pub fn read_lock_state(path: &Path) -> Result<LockState> {
   match read_optional(path)? {
     Some(bytes) => Ok(classify(&bytes)),
@@ -249,6 +248,9 @@ pub fn render_validated(lockfile: &Lockfile) -> Result<Vec<u8>> {
 }
 
 /// Atomic write at the logical global lock path via a temporary sibling.
+/// Commands write through the transaction layer; tests use this to build
+/// lock fixtures directly.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn write_atomic(path: &Path, lockfile: &Lockfile) -> Result<()> {
   let rendered = render_validated(lockfile)?;
 

@@ -1,5 +1,3 @@
-#![allow(dead_code)] // consumed by the command tickets
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
@@ -201,7 +199,9 @@ impl ConfigDocument {
   }
 
   /// Atomic write via a temporary sibling of the real file; a symlinked
-  /// config path stays a symlink.
+  /// config path stays a symlink. Commands write through the transaction
+  /// layer instead; this direct write remains for this module's tests.
+  #[cfg_attr(not(test), allow(dead_code))]
   pub fn save(&self) -> Result<()> {
     validate(&self.doc).context("refusing to save an invalid config")?;
 

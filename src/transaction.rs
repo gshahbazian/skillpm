@@ -1,5 +1,3 @@
-#![allow(dead_code)] // consumed by the command tickets
-
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};

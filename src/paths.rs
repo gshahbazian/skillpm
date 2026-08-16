@@ -1,5 +1,3 @@
-#![allow(dead_code)] // consumed by the command tickets
-
 use std::ffi::OsStr;
 use std::fs::{self, File, TryLockError};
 use std::io;

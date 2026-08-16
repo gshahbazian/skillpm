@@ -521,6 +521,70 @@ targets = ["links/gh-skill"]
   }
 
   #[test]
+  fn commit_failures_roll_back_lock_and_earlier_links() {
+    // two local skills, both changing, so the transaction holds: lock write,
+    // then two link repoints in name order
+    let world = testutil::world();
+    for name in ["skill-one", "skill-two"] {
+      write_skill_md(&world.home.join("skills").join(name), name);
+    }
+    world.write_config(
+      r#"version = 1
+
+[skills.skill-one]
+source = "skills/skill-one"
+targets = ["links/skill-one"]
+
+[skills.skill-two]
+source = "skills/skill-two"
+targets = ["links/skill-two"]
+"#,
+    );
+    let env = world.git_env();
+    execute(&env).unwrap();
+
+    let lock_before = world.lock_bytes();
+    let one_before = link_dest(&world, "links/skill-one");
+    for name in ["skill-one", "skill-two"] {
+      fs::write(world.home.join("skills").join(name).join("new.md"), "x").unwrap();
+    }
+
+    // sabotage skill-two's target AFTER staging: the commit writes the lock
+    // and repoints skill-one before failing on skill-two's changed state
+    let two = world.home.join("links/skill-two");
+    let error = testutil::retry_lock(|| {
+      execute_with_hook(&env, &mut || {
+        if fs::symlink_metadata(&two)
+          .map(|meta| meta.file_type().is_symlink())
+          .unwrap_or(false)
+        {
+          fs::remove_file(&two).unwrap();
+          fs::write(&two, "user data").unwrap();
+        }
+        Ok(())
+      })
+    })
+    .unwrap_err();
+    assert!(
+      error.to_string().contains("changed since it was planned"),
+      "unexpected error: {error:#}"
+    );
+
+    // everything the commit had already applied was restored
+    assert_eq!(
+      world.lock_bytes(),
+      lock_before,
+      "the lock write was rolled back"
+    );
+    assert_eq!(
+      link_dest(&world, "links/skill-one"),
+      one_before,
+      "skill-one's already-applied repoint was rolled back"
+    );
+    assert_eq!(fs::read_to_string(&two).unwrap(), "user data");
+  }
+
+  #[test]
   fn an_external_lock_edit_aborts_even_when_the_lock_is_unchanged() {
     let fixture = fixture();
     let env = fixture.world.git_env();

@@ -1,5 +1,3 @@
-#![allow(dead_code)] // consumed by the store and command tickets
-
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -32,10 +30,6 @@ pub struct SnapshotTree {
 impl SnapshotTree {
   pub fn entries(&self) -> &[SnapshotEntry] {
     &self.entries
-  }
-
-  pub fn root(&self) -> &Path {
-    &self.root
   }
 }
 

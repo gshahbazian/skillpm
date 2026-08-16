@@ -1,5 +1,3 @@
-#![allow(dead_code)] // consumed by the command tickets
-
 use std::path::PathBuf;
 
 use anyhow::{Result, bail};

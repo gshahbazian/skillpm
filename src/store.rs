@@ -1,5 +1,3 @@
-#![allow(dead_code)] // consumed by the command tickets
-
 use std::collections::BTreeSet;
 use std::fs;
 use std::io;

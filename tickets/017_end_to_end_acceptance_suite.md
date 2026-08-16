@@ -1,6 +1,6 @@
 ---
 name: End-to-end acceptance suite
-status: pending
+status: done
 ---
 
 # Goal

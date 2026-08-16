@@ -5,12 +5,10 @@ const YELLOW: &str = "\x1b[33m";
 const RESET: &str = "\x1b[0m";
 
 /// Progress lines go to stderr so stdout stays a clean success summary.
-#[allow(dead_code)] // wired up by the command tickets
 pub fn progress(message: &str) {
   eprintln!("{message}");
 }
 
-#[allow(dead_code)] // wired up by the command tickets
 pub fn warning(message: &str) {
   eprintln!("{}{message}", paint(YELLOW, "warning: "));
 }
@@ -20,7 +18,6 @@ pub fn error(message: &str) {
 }
 
 /// The one thing that belongs on stdout.
-#[allow(dead_code)] // wired up by the command tickets
 pub fn success(message: &str) {
   println!("{message}");
 }

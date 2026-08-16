@@ -1,5 +1,3 @@
-#![allow(dead_code)] // consumed by the github acquisition layer
-
 use std::fs;
 use std::path::Path;
 

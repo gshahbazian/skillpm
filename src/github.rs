@@ -1,5 +1,3 @@
-#![allow(dead_code)] // consumed by the command tickets
-
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -39,10 +37,14 @@ impl GitClient {
       program: PathBuf::from("git"),
       timeout: timeout_from(std::env::var("SPM_GIT_TIMEOUT_SECONDS").ok().as_deref()),
       tokens,
+      // always the real URL: black-box tests redirect it with an isolated
+      // git config (url.<file-base>.insteadOf), not a runtime override
       remote_base: "https://github.com/".to_string(),
     }
   }
 
+  /// Fully injectable constructor; production uses from_env, tests use this.
+  #[cfg_attr(not(test), allow(dead_code))]
   pub fn new(
     program: PathBuf,
     timeout: Duration,
@@ -827,6 +829,10 @@ mod tests {
       .args(args)
       .current_dir(dir)
       .env("GIT_CONFIG_NOSYSTEM", "1")
+      .env("GIT_CONFIG_GLOBAL", "/dev/null")
+      .env_remove("GIT_CONFIG_COUNT")
+      .env_remove("GIT_CONFIG_PARAMETERS")
+      .env_remove("GIT_DIR")
       .env("GIT_AUTHOR_NAME", "t")
       .env("GIT_AUTHOR_EMAIL", "t@t")
       .env("GIT_COMMITTER_NAME", "t")
