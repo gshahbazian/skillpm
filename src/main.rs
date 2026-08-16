@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod output;
+mod paths;
 mod platform;
 
 use std::process::ExitCode;

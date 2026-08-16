@@ -1,6 +1,6 @@
 ---
 name: Global paths and operation lock
-status: pending
+status: done
 ---
 
 # Goal
