@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod config;
+mod lockfile;
 mod output;
 mod paths;
 mod platform;

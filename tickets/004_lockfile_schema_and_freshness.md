@@ -1,6 +1,6 @@
 ---
 name: Lockfile schema and freshness validation
-status: pending
+status: done
 ---
 
 # Goal
