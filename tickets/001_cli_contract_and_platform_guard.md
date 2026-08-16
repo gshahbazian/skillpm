@@ -1,6 +1,6 @@
 ---
 name: CLI contract and platform guard
-status: pending
+status: done
 ---
 
 # Goal
