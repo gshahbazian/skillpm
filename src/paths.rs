@@ -83,7 +83,7 @@ fn home_dir() -> Result<PathBuf> {
   Ok(home)
 }
 
-fn create_private_dir(path: &Path) -> io::Result<()> {
+pub fn create_private_dir(path: &Path) -> io::Result<()> {
   let mut builder = fs::DirBuilder::new();
   builder.recursive(true);
 

@@ -8,6 +8,7 @@ mod platform;
 mod skill;
 mod snapshot;
 mod source;
+mod store;
 
 use std::process::ExitCode;
 

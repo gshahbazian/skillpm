@@ -1,6 +1,6 @@
 ---
 name: Content-addressed snapshot store
-status: pending
+status: done
 ---
 
 # Goal
