@@ -69,6 +69,10 @@ fn parse_github(input: &str, rest: &str) -> Result<GitHubSource> {
     if component.contains('\\') || component.chars().any(char::is_whitespace) {
       return Err(invalid("unsupported character in component"));
     }
+    // a leading '-' could read as an option to a git subcommand
+    if component.starts_with('-') {
+      return Err(invalid("component may not start with '-'"));
+    }
   }
 
   let path = if components.len() > 2 {
@@ -170,6 +174,8 @@ mod tests {
       "github:owner/repo#fragment",
       "github:owner/repo/pa th",
       "github:owner/repo/pa\\th",
+      "github:owner/repo/-opath",
+      "github:owner/-flag/path",
       "https://github.com/anthropics/skills",
       "git@github.com:anthropics/skills.git",
       "github.com/anthropics/skills",

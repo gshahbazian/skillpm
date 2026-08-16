@@ -1,14 +1,18 @@
 #![allow(dead_code)] // consumed by the command tickets
 
+use std::collections::BTreeMap;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 
+use crate::skill;
+use crate::snapshot::{self, GitFilter, SnapshotTree};
 use crate::source::GitHubSource;
+use crate::store::{SnapshotStatus, Store};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -117,14 +121,19 @@ impl GitClient {
   /// First attempt lets ordinary credential helpers work; on a GitHub auth
   /// failure, retries once per available token. Non-auth failures never retry.
   fn run_with_auth(&self, args: &[String]) -> Result<String> {
+    let stdout = self.run_with_auth_raw(args, &[])?;
+    Ok(String::from_utf8_lossy(&stdout).into_owned())
+  }
+
+  fn run_with_auth_raw(&self, args: &[String], extra_env: &[(&str, &str)]) -> Result<Vec<u8>> {
     let mut attempts: Vec<Option<&str>> = vec![None];
     attempts.extend(self.tokens.iter().map(|token| Some(token.as_str())));
 
     let mut last_error = String::new();
     for token in attempts {
-      let output = self.run_once(args, token)?;
+      let output = self.run_once(args, token, extra_env)?;
       if output.success {
-        return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+        return Ok(output.stdout);
       }
 
       last_error = self.redact(&String::from_utf8_lossy(&output.stderr));
@@ -140,7 +149,12 @@ impl GitClient {
     )
   }
 
-  fn run_once(&self, args: &[String], token: Option<&str>) -> Result<RawOutput> {
+  fn run_once(
+    &self,
+    args: &[String],
+    token: Option<&str>,
+    extra_env: &[(&str, &str)],
+  ) -> Result<RawOutput> {
     let mut command = Command::new(&self.program);
     command
       .args(args)
@@ -156,6 +170,10 @@ impl GitClient {
       .stdin(Stdio::null())
       .stdout(Stdio::piped())
       .stderr(Stdio::piped());
+
+    for (key, value) in extra_env {
+      command.env(key, value);
+    }
 
     // own process group, so a timeout can kill git AND its helper children
     #[cfg(unix)]
@@ -237,6 +255,400 @@ impl GitClient {
   }
 }
 
+/// What commands pass in per configured GitHub skill.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GitHubSkillRequest {
+  /// Config key (or a placeholder for `add`); used for grouping and reporting.
+  pub key: String,
+  pub source: GitHubSource,
+  pub r#ref: Option<String>,
+  /// Locked state, enabling the unchanged fast path.
+  pub locked: Option<LockedGitHub>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct LockedGitHub {
+  pub commit: String,
+  pub content_hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PreparedGitHubSkill {
+  pub key: String,
+  pub name: String,
+  pub description: String,
+  pub commit: String,
+  pub content_hash: String,
+  pub reused: bool,
+}
+
+const MAX_CONCURRENT_GROUPS: usize = 4;
+
+/// Resolves, fetches, extracts, and validates every requested GitHub skill,
+/// then commits snapshots to the store only after the whole preparation
+/// phase has succeeded. Writes nothing but store data.
+pub fn prepare_github_skills(
+  client: &GitClient,
+  store: &Store,
+  requests: &[GitHubSkillRequest],
+) -> Result<Vec<PreparedGitHubSkill>> {
+  // one resolution and at most one fetch per repository/ref group;
+  // BTreeMap gives deterministic group order for reporting and errors
+  let mut groups: BTreeMap<(String, String, Option<String>), Vec<&GitHubSkillRequest>> =
+    BTreeMap::new();
+  for request in requests {
+    groups
+      .entry((
+        request.source.owner.clone(),
+        request.source.repo.clone(),
+        request.r#ref.clone(),
+      ))
+      .or_default()
+      .push(request);
+  }
+  let groups: Vec<Vec<&GitHubSkillRequest>> = groups.into_values().collect();
+
+  // phase 1: everything fallible, bounded to four concurrent group jobs;
+  // a failed batch stops later batches from launching
+  let mut staged_groups: Vec<StagedGroup> = Vec::new();
+  for batch in groups.chunks(MAX_CONCURRENT_GROUPS) {
+    let results: Vec<Result<StagedGroup>> = std::thread::scope(|scope| {
+      let handles: Vec<_> = batch
+        .iter()
+        .map(|group| scope.spawn(|| prepare_group(client, store, group)))
+        .collect();
+      handles
+        .into_iter()
+        .map(|handle| handle.join().expect("group preparation panicked"))
+        .collect()
+    });
+
+    for result in results {
+      staged_groups.push(result?);
+    }
+  }
+
+  // phase 2: store commits, sequential and only after every group succeeded
+  let mut prepared = Vec::new();
+  for group in staged_groups {
+    for skill in group.skills {
+      match skill.outcome {
+        StagedOutcome::Reused { content_hash } => {
+          let (name, description) = metadata_from_snapshot(store, &content_hash)?;
+          prepared.push(PreparedGitHubSkill {
+            key: skill.key,
+            name,
+            description,
+            commit: skill.commit,
+            content_hash,
+            reused: true,
+          });
+        }
+        StagedOutcome::Fresh { tree } => {
+          let committed = store.commit_tree(&tree)?;
+          let (name, description) = metadata_from_snapshot(store, &committed.content_hash)?;
+          prepared.push(PreparedGitHubSkill {
+            key: skill.key,
+            name,
+            description,
+            commit: skill.commit,
+            content_hash: committed.content_hash,
+            reused: false,
+          });
+        }
+      }
+    }
+  }
+
+  prepared.sort_by(|a, b| a.key.cmp(&b.key));
+  Ok(prepared)
+}
+
+/// For `install`: fetch the exact locked commit and rebuild the snapshot,
+/// which must reproduce the locked hash exactly.
+pub fn reconstruct_github_snapshot(
+  client: &GitClient,
+  store: &Store,
+  source: &GitHubSource,
+  commit: &str,
+  locked_hash: &str,
+) -> Result<()> {
+  let temp = tempfile::tempdir().context("failed to create a temporary directory")?;
+  let git_dir = temp.path().join("repo.git");
+  client.fetch_commit(&client.remote_url(source), &git_dir, commit)?;
+
+  let tree = stage_skill(client, &git_dir, &temp.path().join("skill"), commit, source)?;
+  let committed = store.commit_tree(&tree)?;
+  if committed.content_hash != locked_hash {
+    if committed.created {
+      let _ = store.remove_snapshot(&committed.content_hash);
+    }
+    bail!(
+      "github:{}/{} at {commit} no longer reproduces its locked snapshot; run `spm update`",
+      source.owner,
+      source.repo
+    );
+  }
+
+  Ok(())
+}
+
+struct StagedGroup {
+  skills: Vec<StagedSkill>,
+  /// Keeps unpacked trees alive until phase 2 commits them.
+  _temp: Option<tempfile::TempDir>,
+}
+
+struct StagedSkill {
+  key: String,
+  commit: String,
+  outcome: StagedOutcome,
+}
+
+enum StagedOutcome {
+  Reused { content_hash: String },
+  Fresh { tree: SnapshotTree },
+}
+
+fn prepare_group(
+  client: &GitClient,
+  store: &Store,
+  requests: &[&GitHubSkillRequest],
+) -> Result<StagedGroup> {
+  let source = &requests[0].source;
+  let commit = client.resolve_ref(source, requests[0].r#ref.as_deref())?;
+
+  let mut skills = Vec::new();
+  let mut pending: Vec<&GitHubSkillRequest> = Vec::new();
+  for request in requests {
+    // unchanged fast path: same commit and a verified snapshot skip the fetch
+    if let Some(locked) = &request.locked
+      && locked.commit == commit
+      && store.verify_snapshot(&locked.content_hash)? == SnapshotStatus::Valid
+    {
+      skills.push(StagedSkill {
+        key: request.key.clone(),
+        commit: commit.clone(),
+        outcome: StagedOutcome::Reused {
+          content_hash: locked.content_hash.clone(),
+        },
+      });
+      continue;
+    }
+    pending.push(request);
+  }
+
+  if pending.is_empty() {
+    return Ok(StagedGroup {
+      skills,
+      _temp: None,
+    });
+  }
+
+  let temp = tempfile::tempdir().context("failed to create a temporary directory")?;
+  let git_dir = temp.path().join("repo.git");
+  client.fetch_commit(&client.remote_url(source), &git_dir, &commit)?;
+
+  for (index, request) in pending.into_iter().enumerate() {
+    let unpack_dir = temp.path().join(format!("skill-{index}"));
+    let tree = stage_skill(client, &git_dir, &unpack_dir, &commit, &request.source)
+      .with_context(|| format!("failed to prepare skill '{}'", request.key))?;
+    skills.push(StagedSkill {
+      key: request.key.clone(),
+      commit: commit.clone(),
+      outcome: StagedOutcome::Fresh { tree },
+    });
+  }
+
+  Ok(StagedGroup {
+    skills,
+    _temp: Some(temp),
+  })
+}
+
+/// Extracts one selected path from the fetched commit into `unpack_dir` and
+/// validates it, without committing anything to the store yet.
+fn stage_skill(
+  client: &GitClient,
+  git_dir: &Path,
+  unpack_dir: &Path,
+  commit: &str,
+  source: &GitHubSource,
+) -> Result<SnapshotTree> {
+  let path = source.path.as_deref();
+
+  reject_submodules(client, git_dir, commit, path)?;
+
+  let tar = client.archive(git_dir, commit, path)?;
+  let written = crate::archive::unpack_tar(&tar, unpack_dir, path)?;
+  if written == 0 {
+    bail!(
+      "path '{}' does not exist in commit {commit}",
+      path.unwrap_or(".")
+    );
+  }
+
+  let tree = snapshot::scan_tree(unpack_dir, GitFilter::IncludeAll)?;
+  reject_lfs_pointers(unpack_dir, &tree)?;
+
+  // fail the preparation phase before any snapshot is committed; the final
+  // metadata is read from the immutable snapshot in phase 2
+  skill::load_skill_metadata(unpack_dir)?;
+
+  Ok(tree)
+}
+
+fn reject_submodules(
+  client: &GitClient,
+  git_dir: &Path,
+  commit: &str,
+  path: Option<&str>,
+) -> Result<()> {
+  let mut args = vec![
+    "--git-dir".to_string(),
+    git_dir.display().to_string(),
+    "ls-tree".to_string(),
+    "-r".to_string(),
+    commit.to_string(),
+  ];
+  if let Some(path) = path {
+    args.push("--".to_string());
+    args.push(literal_pathspec(path));
+  }
+
+  let listing = String::from_utf8_lossy(&client.run_attr_clean(&args)?).into_owned();
+  for line in listing.lines() {
+    // "<mode> <type> <oid>\t<path>"; gitlinks are mode 160000
+    if line.starts_with("160000 ") {
+      let name = line.split('\t').nth(1).unwrap_or("?");
+      bail!("'{name}' is a Git submodule; skills with submodules are not supported in v1");
+    }
+  }
+  Ok(())
+}
+
+const LFS_POINTER_PREFIX: &[u8] = b"version https://git-lfs";
+
+fn reject_lfs_pointers(root: &Path, tree: &SnapshotTree) -> Result<()> {
+  for entry in tree.entries() {
+    if !matches!(entry.kind, crate::snapshot::EntryKind::File { .. }) {
+      continue;
+    }
+    let path = root.join(&entry.path);
+    let mut prefix = vec![0u8; LFS_POINTER_PREFIX.len()];
+    let mut file =
+      std::fs::File::open(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let read = file.read(&mut prefix)?;
+    if &prefix[..read] == LFS_POINTER_PREFIX {
+      bail!(
+        "'{}' is a Git LFS pointer; skills using LFS are not supported in v1",
+        entry.path
+      );
+    }
+  }
+  Ok(())
+}
+
+fn literal_pathspec(path: &str) -> String {
+  format!(":(literal){path}")
+}
+
+fn metadata_from_snapshot(store: &Store, content_hash: &str) -> Result<(String, String)> {
+  let snapshot_dir = store.snapshot_path(content_hash)?;
+  let metadata = skill::load_skill_metadata(&snapshot_dir)?;
+  Ok((metadata.name, metadata.description))
+}
+
+impl GitClient {
+  /// Shallow, blob-filtered fetch of one exact commit, with a plain
+  /// depth-1 fallback when the server does not support partial fetch.
+  pub(crate) fn fetch_commit(&self, url: &str, git_dir: &Path, commit: &str) -> Result<()> {
+    let git_dir_arg = git_dir.display().to_string();
+
+    self.run_with_auth(&[
+      "init".to_string(),
+      "--bare".to_string(),
+      "--quiet".to_string(),
+      git_dir_arg.clone(),
+    ])?;
+    self.run_with_auth(&[
+      "--git-dir".to_string(),
+      git_dir_arg.clone(),
+      "remote".to_string(),
+      "add".to_string(),
+      "origin".to_string(),
+      url.to_string(),
+    ])?;
+
+    let fetch = |filter: bool| -> Result<String> {
+      let mut args = vec![
+        "--git-dir".to_string(),
+        git_dir_arg.clone(),
+        "fetch".to_string(),
+        "--quiet".to_string(),
+        "--depth".to_string(),
+        "1".to_string(),
+      ];
+      if filter {
+        args.push("--filter=blob:none".to_string());
+      }
+      args.push("origin".to_string());
+      args.push(commit.to_string());
+      self.run_with_auth(&args)
+    };
+
+    match fetch(true) {
+      Ok(_) => Ok(()),
+      // fall back to a plain depth-1 fetch ONLY when the server rejects
+      // filtering; auth, timeout, missing-commit, and network failures must
+      // not double the work
+      Err(error) if filter_unsupported(&format!("{error:#}")) => fetch(false)
+        .map(|_| ())
+        .context("failed to fetch the requested commit"),
+      Err(error) => Err(error),
+    }
+  }
+
+  /// `git archive` of the exact commit; the tar bytes cannot be altered by
+  /// checkout filters because no working tree is ever involved.
+  pub(crate) fn archive(
+    &self,
+    git_dir: &Path,
+    commit: &str,
+    path: Option<&str>,
+  ) -> Result<Vec<u8>> {
+    let mut args = vec![
+      "--git-dir".to_string(),
+      git_dir.display().to_string(),
+      "archive".to_string(),
+      "--format=tar".to_string(),
+      commit.to_string(),
+    ];
+    if let Some(path) = path {
+      // "--" plus :(literal) so a hostile path can be neither an option
+      // (e.g. -o<file>) nor a glob
+      args.push("--".to_string());
+      args.push(literal_pathspec(path));
+    }
+    self.run_attr_clean(&args)
+  }
+
+  /// Local object reads with the user's global/system attributes neutralized,
+  /// so eol/filters config cannot alter snapshot bytes. Global *config* stays
+  /// available: a blob-filtered repo may lazily fetch objects during archive,
+  /// which needs credential helpers.
+  pub(crate) fn run_attr_clean(&self, args: &[String]) -> Result<Vec<u8>> {
+    let mut full: Vec<String> = vec![
+      "-c".to_string(),
+      "core.attributesfile=".to_string(),
+      "-c".to_string(),
+      "core.autocrlf=false".to_string(),
+    ];
+    full.extend_from_slice(args);
+    self.run_with_auth_raw(&full, &[("GIT_ATTR_NOSYSTEM", "1")])
+  }
+}
+
 /// Kills git and every descendant in its process group; a lone child.kill()
 /// leaves helper children alive holding the output pipes, which would hang
 /// the reader threads past the timeout.
@@ -284,6 +696,20 @@ fn auth_header(token: &str) -> String {
     "Authorization: Basic {}",
     base64(format!("x-access-token:{token}").as_bytes())
   )
+}
+
+/// The hard-fail spellings of "this server cannot do partial fetch" across
+/// git/protocol versions. (Some clients instead warn "filtering not
+/// recognized by server, ignoring" and succeed unfiltered — no fallback
+/// needed there.)
+fn filter_unsupported(error: &str) -> bool {
+  let lower = error.to_lowercase();
+  lower.contains("does not support filtering")
+    || lower.contains("filtering not supported")
+    || lower.contains("filtering capability not supported")
+    || lower.contains("does not support filter")
+    || lower.contains("invalid filter-spec")
+    || (lower.contains("unknown option") && lower.contains("filter"))
 }
 
 fn looks_like_auth_failure(stderr: &str) -> bool {
@@ -735,6 +1161,435 @@ exit 128"#;
 
     let error = client.resolve_ref(&source, Some("main")).unwrap_err();
     assert!(error.to_string().contains("malformed object ID"));
+  }
+
+  /// A bare remote at <tmp>/owner/repo.git containing a repo-root skill and
+  /// two nested skills, with SHA fetch and partial clone enabled.
+  struct SkillRemote {
+    temp: tempfile::TempDir,
+    work: PathBuf,
+    bare: PathBuf,
+  }
+
+  fn write_skill_md(dir: &Path, name: &str) {
+    fs::create_dir_all(dir).unwrap();
+    fs::write(
+      dir.join("SKILL.md"),
+      format!("---\nname: {name}\ndescription: The {name} skill.\n---\n"),
+    )
+    .unwrap();
+  }
+
+  fn skill_remote() -> SkillRemote {
+    let temp = tempfile::tempdir().unwrap();
+    let work = temp.path().join("work");
+    fs::create_dir(&work).unwrap();
+
+    git(&work, &["init", "-b", "main", "."]);
+    write_skill_md(&work, "root-skill");
+    write_skill_md(&work.join("skills/skill-a"), "skill-a");
+    fs::write(work.join("skills/skill-a/extra.md"), "extra\n").unwrap();
+    write_skill_md(&work.join("skills/skill-b"), "skill-b");
+    git(&work, &["add", "."]);
+    git(&work, &["commit", "-m", "skills"]);
+
+    let bare = temp.path().join("owner/repo.git");
+    fs::create_dir_all(bare.parent().unwrap()).unwrap();
+    git(
+      temp.path(),
+      &[
+        "clone",
+        "--bare",
+        work.to_str().unwrap(),
+        bare.to_str().unwrap(),
+      ],
+    );
+    git(&bare, &["config", "uploadpack.allowanysha1inwant", "true"]);
+    git(&bare, &["config", "uploadpack.allowfilter", "true"]);
+
+    SkillRemote { temp, work, bare }
+  }
+
+  impl SkillRemote {
+    /// A client whose git logs every invocation, then delegates to real git.
+    fn logging_client(&self, log: &Path) -> GitClient {
+      let script = format!(
+        r#"echo "$*" >> "{}"
+exec git "$@""#,
+        log.display()
+      );
+      let program = fake_git(self.temp.path(), &script);
+      GitClient::new(
+        program,
+        Duration::from_secs(60),
+        vec![],
+        format!("file://{}/", self.temp.path().display()),
+      )
+    }
+
+    fn store(&self) -> Store {
+      Store::new(&self.temp.path().join("store"))
+    }
+
+    fn source(&self, path: Option<&str>) -> GitHubSource {
+      GitHubSource {
+        owner: "owner".into(),
+        repo: "repo".into(),
+        path: path.map(String::from),
+      }
+    }
+
+    fn request(&self, key: &str, path: Option<&str>) -> GitHubSkillRequest {
+      GitHubSkillRequest {
+        key: key.into(),
+        source: self.source(path),
+        r#ref: Some("main".into()),
+        locked: None,
+      }
+    }
+  }
+
+  fn fetch_count(log: &Path) -> usize {
+    fs::read_to_string(log)
+      .unwrap_or_default()
+      .lines()
+      .filter(|line| line.contains(" fetch "))
+      .count()
+  }
+
+  #[test]
+  fn prepares_root_and_nested_skills_with_one_fetch_per_group() {
+    let remote = skill_remote();
+    let log = remote.temp.path().join("git.log");
+    let client = remote.logging_client(&log);
+    let store = remote.store();
+
+    let requests = vec![
+      remote.request("root-skill", None),
+      remote.request("skill-a", Some("skills/skill-a")),
+      remote.request("skill-b", Some("skills/skill-b")),
+    ];
+    let prepared = prepare_github_skills(&client, &store, &requests).unwrap();
+
+    assert_eq!(prepared.len(), 3);
+    for skill in &prepared {
+      assert_eq!(skill.key, skill.name);
+      assert_eq!(skill.description, format!("The {} skill.", skill.name));
+      assert!(!skill.reused);
+      assert_eq!(
+        store.verify_snapshot(&skill.content_hash).unwrap(),
+        SnapshotStatus::Valid
+      );
+    }
+
+    // the root skill snapshot contains the nested ones (repo root), while a
+    // nested one is prefix-stripped to its own content
+    let a = prepared.iter().find(|s| s.name == "skill-a").unwrap();
+    let a_dir = store.snapshot_path(&a.content_hash).unwrap();
+    assert!(a_dir.join("SKILL.md").exists());
+    assert!(a_dir.join("extra.md").exists());
+    assert!(!a_dir.join("skills").exists());
+
+    assert_eq!(
+      fetch_count(&log),
+      1,
+      "three skills from one repo/ref must share one fetch"
+    );
+  }
+
+  #[test]
+  fn unchanged_locked_skills_skip_fetching_entirely() {
+    let remote = skill_remote();
+    let log = remote.temp.path().join("git.log");
+    let client = remote.logging_client(&log);
+    let store = remote.store();
+
+    let first = prepare_github_skills(
+      &client,
+      &store,
+      &[remote.request("skill-a", Some("skills/skill-a"))],
+    )
+    .unwrap();
+
+    fs::remove_file(&log).unwrap();
+    let mut request = remote.request("skill-a", Some("skills/skill-a"));
+    request.locked = Some(LockedGitHub {
+      commit: first[0].commit.clone(),
+      content_hash: first[0].content_hash.clone(),
+    });
+    let second = prepare_github_skills(&client, &store, &[request]).unwrap();
+
+    assert!(second[0].reused);
+    assert_eq!(second[0].content_hash, first[0].content_hash);
+    assert_eq!(fetch_count(&log), 0, "unchanged skills must not fetch");
+  }
+
+  #[test]
+  fn preparing_succeeds_when_the_server_refuses_filtering() {
+    // end-to-end sanity with a real remote that disallows filters; whether
+    // this git warns-and-ignores or hard-fails, preparation must succeed
+    // (the fallback-vs-no-fallback distinction is tested deterministically
+    // below with fake gits)
+    let remote = skill_remote();
+    git(&remote.bare, &["config", "uploadpack.allowfilter", "false"]);
+
+    let log = remote.temp.path().join("git.log");
+    let client = remote.logging_client(&log);
+    let store = remote.store();
+
+    let prepared = prepare_github_skills(
+      &client,
+      &store,
+      &[remote.request("skill-a", Some("skills/skill-a"))],
+    )
+    .unwrap();
+
+    assert_eq!(
+      store.verify_snapshot(&prepared[0].content_hash).unwrap(),
+      SnapshotStatus::Valid
+    );
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn unsupported_filter_hard_failures_fall_back_exactly_once() {
+    let remote = skill_remote();
+    let log = remote.temp.path().join("git.log");
+
+    // a git whose filtered fetches hard-fail the way older clients do
+    let script = format!(
+      r#"echo "$*" >> "{}"
+case "$*" in
+  *--filter*) echo "fatal: server does not support filtering" >&2; exit 128;;
+esac
+exec git "$@""#,
+      log.display(),
+    );
+    let program = fake_git(remote.temp.path(), &script);
+    let client = GitClient::new(
+      program,
+      Duration::from_secs(60),
+      vec![],
+      format!("file://{}/", remote.temp.path().display()),
+    );
+    let store = remote.store();
+
+    let prepared = prepare_github_skills(
+      &client,
+      &store,
+      &[remote.request("skill-a", Some("skills/skill-a"))],
+    )
+    .unwrap();
+
+    assert_eq!(
+      store.verify_snapshot(&prepared[0].content_hash).unwrap(),
+      SnapshotStatus::Valid
+    );
+    assert_eq!(fetch_count(&log), 2, "one filtered attempt, one fallback");
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn non_filter_fetch_failures_do_not_fall_back() {
+    let remote = skill_remote();
+    let log = remote.temp.path().join("git.log");
+
+    let script = format!(
+      r#"echo "$*" >> "{}"
+case "$*" in
+  *" fetch "*) echo "fatal: unable to access: Could not resolve host" >&2; exit 128;;
+esac
+exec git "$@""#,
+      log.display(),
+    );
+    let program = fake_git(remote.temp.path(), &script);
+    let client = GitClient::new(
+      program,
+      Duration::from_secs(60),
+      vec![],
+      format!("file://{}/", remote.temp.path().display()),
+    );
+    let store = remote.store();
+
+    prepare_github_skills(
+      &client,
+      &store,
+      &[remote.request("skill-a", Some("skills/skill-a"))],
+    )
+    .unwrap_err();
+
+    assert_eq!(
+      fetch_count(&log),
+      1,
+      "network failures must not double the fetch work"
+    );
+  }
+
+  #[test]
+  fn option_shaped_paths_cannot_reach_git_as_options() {
+    let remote = skill_remote();
+    let log = remote.temp.path().join("git.log");
+    let client = remote.logging_client(&log);
+    let store = remote.store();
+
+    // the parser rejects '-' components, so construct the source directly
+    // to prove the -- separator holds on its own
+    let canary = remote.temp.path().join("pwned.tar");
+    let hostile = GitHubSkillRequest {
+      key: "evil".into(),
+      source: GitHubSource {
+        owner: "owner".into(),
+        repo: "repo".into(),
+        path: Some(format!("-o{}", canary.display())),
+      },
+      r#ref: Some("main".into()),
+      locked: None,
+    };
+
+    let error = prepare_github_skills(&client, &store, &[hostile]).unwrap_err();
+    assert!(
+      !canary.exists(),
+      "an option-shaped path must never become a git option"
+    );
+    // behind --, git treats it as a pathspec that matches nothing
+    assert!(format!("{error:#}").contains("failed to prepare skill 'evil'"));
+  }
+
+  #[test]
+  fn locked_reconstruction_is_exact_or_cleaned_up() {
+    let remote = skill_remote();
+    let log = remote.temp.path().join("git.log");
+    let client = remote.logging_client(&log);
+    let store = remote.store();
+
+    let prepared = prepare_github_skills(
+      &client,
+      &store,
+      &[remote.request("skill-a", Some("skills/skill-a"))],
+    )
+    .unwrap();
+    let (commit, hash) = (&prepared[0].commit, &prepared[0].content_hash);
+
+    // simulate a wiped cache, then rebuild the exact locked snapshot
+    store.remove_snapshot(hash).unwrap();
+    reconstruct_github_snapshot(
+      &client,
+      &store,
+      &remote.source(Some("skills/skill-a")),
+      commit,
+      hash,
+    )
+    .unwrap();
+    assert_eq!(store.verify_snapshot(hash).unwrap(), SnapshotStatus::Valid);
+
+    // a hash that no longer reproduces is an error and leaves no orphan
+    store.remove_snapshot(hash).unwrap();
+    let wrong = format!("sha256:{}", "0".repeat(64));
+    let error = reconstruct_github_snapshot(
+      &client,
+      &store,
+      &remote.source(Some("skills/skill-a")),
+      commit,
+      &wrong,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("no longer reproduces"));
+    assert_eq!(
+      store.verify_snapshot(hash).unwrap(),
+      SnapshotStatus::Missing
+    );
+  }
+
+  #[test]
+  fn submodules_are_rejected() {
+    let remote = skill_remote();
+
+    // a second repo added as a submodule of the skill repo
+    let sub = remote.temp.path().join("sub");
+    fs::create_dir(&sub).unwrap();
+    git(&sub, &["init", "-b", "main", "."]);
+    fs::write(sub.join("f"), "x").unwrap();
+    git(&sub, &["add", "."]);
+    git(&sub, &["commit", "-m", "sub"]);
+
+    git(
+      &remote.work,
+      &[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        sub.to_str().unwrap(),
+        "vendored",
+      ],
+    );
+    git(&remote.work, &["commit", "-m", "add submodule"]);
+    git(
+      &remote.work,
+      &["push", remote.bare.to_str().unwrap(), "main:main"],
+    );
+
+    let log = remote.temp.path().join("git.log");
+    let client = remote.logging_client(&log);
+    let store = remote.store();
+
+    let error =
+      prepare_github_skills(&client, &store, &[remote.request("root-skill", None)]).unwrap_err();
+    assert!(format!("{error:#}").contains("submodule"));
+  }
+
+  #[test]
+  fn lfs_pointers_are_rejected_and_nothing_is_committed() {
+    let remote = skill_remote();
+
+    fs::write(
+      remote.work.join("skills/skill-a/model.bin"),
+      "version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 5\n",
+    )
+    .unwrap();
+    git(&remote.work, &["add", "."]);
+    git(&remote.work, &["commit", "-m", "lfs pointer"]);
+    git(
+      &remote.work,
+      &["push", remote.bare.to_str().unwrap(), "main:main"],
+    );
+
+    let log = remote.temp.path().join("git.log");
+    let client = remote.logging_client(&log);
+    let store = remote.store();
+
+    let error = prepare_github_skills(
+      &client,
+      &store,
+      &[remote.request("skill-a", Some("skills/skill-a"))],
+    )
+    .unwrap_err();
+    assert!(format!("{error:#}").contains("LFS"));
+
+    // a preparation failure must leave no committed snapshots behind
+    let sha256 = remote.temp.path().join("store/sha256");
+    let committed = fs::read_dir(&sha256).map(|dir| dir.count()).unwrap_or(0);
+    assert_eq!(committed, 0);
+  }
+
+  #[test]
+  #[cfg(unix)]
+  fn local_object_reads_neutralize_global_attributes() {
+    let temp = tempfile::tempdir().unwrap();
+    let log = temp.path().join("env.log");
+    let script = format!(r#"echo "$GIT_ATTR_NOSYSTEM $*" > "{}""#, log.display());
+    let program = fake_git(temp.path(), &script);
+    let client = fake_client(program, vec![]);
+
+    client
+      .run_attr_clean(&["ls-tree".to_string(), "HEAD".to_string()])
+      .unwrap();
+
+    let logged = fs::read_to_string(&log).unwrap();
+    assert_eq!(
+      logged.trim(),
+      "1 -c core.attributesfile= -c core.autocrlf=false ls-tree HEAD"
+    );
   }
 
   #[test]

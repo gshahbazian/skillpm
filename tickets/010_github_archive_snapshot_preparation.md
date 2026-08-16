@@ -1,6 +1,6 @@
 ---
 name: GitHub archive snapshot preparation
-status: pending
+status: done
 ---
 
 # Goal
