@@ -10,6 +10,7 @@ use crate::github::{self, GitClient};
 use crate::local;
 use crate::lockfile::LockedSkill;
 use crate::paths::{OperationLock, Paths, create_private_dir};
+use crate::skill;
 use crate::source::{Source, parse_source};
 use crate::store::Store;
 
@@ -58,6 +59,18 @@ pub(crate) fn acquire_lock(paths: &Paths) -> Result<OperationLock> {
       .with_context(|| format!("failed to recreate {}", paths.data_root.display()))?;
   }
   OperationLock::acquire(&paths.operation_lock)
+}
+
+/// The verified snapshot must carry the identity configured for its lock entry.
+pub(crate) fn validate_snapshot_identity(
+  store: &Store,
+  name: &str,
+  content_hash: &str,
+) -> Result<()> {
+  let snapshot = store.snapshot_path(content_hash)?;
+  let metadata = skill::load_skill_metadata(&snapshot)
+    .with_context(|| format!("locked snapshot for skill '{name}' is invalid"))?;
+  skill::ensure_key_matches(name, &metadata.name)
 }
 
 /// Rebuilds a missing/corrupt snapshot at its exact locked version: GitHub

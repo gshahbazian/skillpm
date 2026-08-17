@@ -68,6 +68,8 @@ pub(crate) fn execute(env: &CommandEnv) -> Result<InstallSummary> {
         reconstructed += 1;
       }
     }
+
+    super::validate_snapshot_identity(&store, name, &entry.content_hash)?;
   }
 
   let mut transaction = Transaction::new();
@@ -346,6 +348,30 @@ targets = ["links/gh-skill", "links2/gh-skill"]
       store.verify_snapshot(&fixture.gh_hash).unwrap(),
       SnapshotStatus::Valid
     );
+  }
+
+  #[test]
+  fn install_rejects_a_snapshot_whose_name_does_not_match_its_config_key() {
+    let fixture = fixture();
+
+    let config = String::from_utf8(fixture.world.config_bytes())
+      .unwrap()
+      .replace("[skills.local-skill]", "[skills.alias]")
+      .replace("links/local-skill", "links/alias");
+    fixture.world.write_config(&config);
+
+    let lock = String::from_utf8(fixture.world.lock_bytes())
+      .unwrap()
+      .replace("[skills.local-skill]", "[skills.alias]");
+    fs::write(&fixture.world.paths().lockfile, lock).unwrap();
+
+    let error = execute(&fixture.world.offline_env()).unwrap_err();
+    assert!(
+      error
+        .to_string()
+        .contains("config key 'alias' does not match skill name 'local-skill'")
+    );
+    assert!(!fixture.world.home.join("links/alias").exists());
   }
 
   #[test]

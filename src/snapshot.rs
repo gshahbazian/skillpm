@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -225,9 +226,7 @@ pub fn hash_tree(tree: &SnapshotTree) -> Result<String> {
         update_bytes(&mut hasher, entry.path.as_bytes());
         hasher.update([u8::from(*executable)]);
         let source = tree.root.join(&entry.path);
-        let contents =
-          fs::read(&source).with_context(|| format!("failed to read {}", source.display()))?;
-        update_bytes(&mut hasher, &contents);
+        update_file(&mut hasher, &source)?;
       }
       EntryKind::Symlink { destination } => {
         hasher.update(b"L");
@@ -245,6 +244,40 @@ pub fn hash_tree(tree: &SnapshotTree) -> Result<String> {
 fn update_bytes(hasher: &mut Sha256, bytes: &[u8]) {
   hasher.update((bytes.len() as u64).to_be_bytes());
   hasher.update(bytes);
+}
+
+fn update_file(hasher: &mut Sha256, path: &Path) -> Result<()> {
+  let mut file =
+    fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+  let expected_len = file
+    .metadata()
+    .with_context(|| format!("failed to stat {}", path.display()))?
+    .len();
+  hasher.update(expected_len.to_be_bytes());
+
+  let mut actual_len = 0u64;
+  let mut buffer = [0u8; 64 * 1024];
+  loop {
+    let read = file
+      .read(&mut buffer)
+      .with_context(|| format!("failed to read {}", path.display()))?;
+    if read == 0 {
+      break;
+    }
+
+    actual_len = actual_len
+      .checked_add(read as u64)
+      .context("file length overflow while hashing")?;
+    if actual_len > expected_len {
+      bail!("{} changed size while it was being hashed", path.display());
+    }
+    hasher.update(&buffer[..read]);
+  }
+
+  if actual_len != expected_len {
+    bail!("{} changed size while it was being hashed", path.display());
+  }
+  Ok(())
 }
 
 /// Creates `destination` (which must not exist) with exactly the tree's

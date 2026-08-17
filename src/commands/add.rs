@@ -181,6 +181,7 @@ fn stage_and_commit(
         ));
         super::reconstruct_locked(env, store, &name, &entry)?;
       }
+      super::validate_snapshot_identity(store, &name, &entry.content_hash)?;
 
       let added = new_target_paths(&existing_skill.targets, new_targets, &paths.home)?;
       (name, entry, added, true)
@@ -444,6 +445,37 @@ mod tests {
       "config untouched byte for byte"
     );
     assert_eq!(world.lock_bytes(), lock_before);
+  }
+
+  #[test]
+  fn repeated_add_rejects_a_snapshot_with_a_mismatched_name() {
+    let world = testutil::world();
+    write_skill_md(&world.home.join("skills/local-skill"), "local-skill");
+    add_local(&world).unwrap();
+
+    let config = String::from_utf8(world.config_bytes())
+      .unwrap()
+      .replace("[skills.local-skill]", "[skills.alias]")
+      .replace("links/local-skill", "links/alias");
+    world.write_config(&config);
+
+    let lock = String::from_utf8(world.lock_bytes())
+      .unwrap()
+      .replace("[skills.local-skill]", "[skills.alias]");
+    fs::write(&world.paths().lockfile, lock).unwrap();
+
+    let error = execute(
+      &world.offline_env(),
+      "skills/local-skill",
+      &[PathBuf::from("links/alias")],
+      None,
+    )
+    .unwrap_err();
+    assert!(
+      error
+        .to_string()
+        .contains("config key 'alias' does not match skill name 'local-skill'")
+    );
   }
 
   #[test]

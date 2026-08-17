@@ -322,10 +322,7 @@ pub fn prepare_github_skills(
         .iter()
         .map(|group| scope.spawn(|| prepare_group(client, store, group)))
         .collect();
-      handles
-        .into_iter()
-        .map(|handle| handle.join().expect("group preparation panicked"))
-        .collect()
+      handles.into_iter().map(join_group).collect()
     });
 
     for result in results {
@@ -336,6 +333,22 @@ pub fn prepare_github_skills(
   let mut prepared = commit_phase(store, staged_groups)?;
   prepared.sort_by(|a, b| a.key.cmp(&b.key));
   Ok(prepared)
+}
+
+fn join_group<T>(handle: std::thread::ScopedJoinHandle<'_, Result<T>>) -> Result<T> {
+  match handle.join() {
+    Ok(result) => result,
+    Err(payload) => {
+      let message = if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+      } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+      } else {
+        "unknown panic payload".to_string()
+      };
+      bail!("GitHub group preparation panicked: {message}")
+    }
+  }
 }
 
 /// Phase 2: sequential store commits, run only after every group staged
@@ -567,7 +580,7 @@ fn reject_submodules(
   Ok(())
 }
 
-const LFS_POINTER_PREFIX: &[u8] = b"version https://git-lfs";
+const LFS_VERSION: &[u8] = b"version https://git-lfs.github.com/spec/v1";
 
 fn reject_lfs_pointers(root: &Path, tree: &SnapshotTree) -> Result<()> {
   for entry in tree.entries() {
@@ -575,11 +588,7 @@ fn reject_lfs_pointers(root: &Path, tree: &SnapshotTree) -> Result<()> {
       continue;
     }
     let path = root.join(&entry.path);
-    let mut prefix = vec![0u8; LFS_POINTER_PREFIX.len()];
-    let mut file =
-      std::fs::File::open(&path).with_context(|| format!("failed to read {}", path.display()))?;
-    let read = file.read(&mut prefix)?;
-    if &prefix[..read] == LFS_POINTER_PREFIX {
+    if is_lfs_pointer(&path)? {
       bail!(
         "'{}' is a Git LFS pointer; skills using LFS are not supported in v1",
         entry.path
@@ -587,6 +596,22 @@ fn reject_lfs_pointers(root: &Path, tree: &SnapshotTree) -> Result<()> {
     }
   }
   Ok(())
+}
+
+fn is_lfs_pointer(path: &Path) -> Result<bool> {
+  let file =
+    std::fs::File::open(path).with_context(|| format!("failed to read {}", path.display()))?;
+  let mut prefix = Vec::with_capacity(LFS_VERSION.len() + 2);
+  file
+    .take((LFS_VERSION.len() + 2) as u64)
+    .read_to_end(&mut prefix)?;
+
+  if !prefix.starts_with(LFS_VERSION) {
+    return Ok(false);
+  }
+
+  let suffix = &prefix[LFS_VERSION.len()..];
+  Ok(suffix.starts_with(b"\n") || suffix.starts_with(b"\r\n"))
 }
 
 fn literal_pathspec(path: &str) -> String {
@@ -935,6 +960,41 @@ mod tests {
       tokens,
       "https://github.com/".into(),
     )
+  }
+
+  #[test]
+  fn group_thread_panics_become_errors() {
+    let error = std::thread::scope(|scope| {
+      join_group(scope.spawn(|| -> Result<()> {
+        panic!("injected group panic");
+      }))
+    })
+    .unwrap_err();
+
+    assert!(error.to_string().contains("injected group panic"));
+  }
+
+  #[test]
+  fn lfs_detection_requires_the_exact_version_line() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("file");
+
+    fs::write(
+      &path,
+      "version https://git-lfs.github.com/spec/v1\noid sha256:abc\nsize 5\n",
+    )
+    .unwrap();
+    assert!(is_lfs_pointer(&path).unwrap());
+
+    fs::write(
+      &path,
+      "version https://git-lfs.github.com/spec/v1\r\noid sha256:abc\r\nsize 5\r\n",
+    )
+    .unwrap();
+    assert!(is_lfs_pointer(&path).unwrap());
+
+    fs::write(&path, "version https://git-lfs-not-a-pointer\n").unwrap();
+    assert!(!is_lfs_pointer(&path).unwrap());
   }
 
   #[test]
