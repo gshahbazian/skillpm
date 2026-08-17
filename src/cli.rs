@@ -9,7 +9,7 @@ pub struct Cli {
   pub command: Command,
 }
 
-#[derive(Debug, PartialEq, Subcommand)]
+#[derive(Debug, PartialEq, Eq, Subcommand)]
 pub enum Command {
   /// Reproduce skillpm.lock exactly, without resolving new versions
   Install,

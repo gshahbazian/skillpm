@@ -44,7 +44,7 @@ impl GitClient {
   }
 
   /// Fully injectable constructor; production uses from_env, tests use this.
-  #[cfg_attr(not(test), allow(dead_code))]
+  #[cfg(test)]
   pub fn new(
     program: PathBuf,
     timeout: Duration,
@@ -258,7 +258,7 @@ impl GitClient {
 }
 
 /// What commands pass in per configured GitHub skill.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitHubSkillRequest {
   /// Config key (or a placeholder for `add`); used for grouping and reporting.
   pub key: String,
@@ -268,13 +268,13 @@ pub struct GitHubSkillRequest {
   pub locked: Option<LockedGitHub>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockedGitHub {
   pub commit: String,
   pub content_hash: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedGitHubSkill {
   pub key: String,
   pub name: String,
@@ -722,9 +722,13 @@ fn kill_process_group(child: &mut std::process::Child) {
   {
     // the child was spawned with process_group(0), so its pid is the pgid;
     // the negative pid targets the whole group
-    #[allow(unsafe_code)] // no safe std API for killpg
-    unsafe {
-      libc::kill(-(child.id() as i32), libc::SIGKILL);
+    if let Ok(pid) = libc::pid_t::try_from(child.id()) {
+      // SAFETY: `pid` identifies the live child process, and `kill` does not
+      // retain or dereference pointers. A negative pid addresses its group.
+      #[allow(unsafe_code)] // no safe std API for killpg
+      unsafe {
+        libc::kill(-pid, libc::SIGKILL);
+      }
     }
   }
 

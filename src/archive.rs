@@ -6,14 +6,14 @@ use anyhow::{Context, Result, bail};
 /// A minimal reader for `git archive --format=tar` output: ustar fields plus
 /// the pax (`x`/`g`) and GNU (`L`/`K`) long-name extensions git emits.
 /// Checksums are not verified; the bytes come from our own git subprocess.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 struct TarEntry<'a> {
   path: String,
   kind: TarKind,
   data: &'a [u8],
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 enum TarKind {
   File { executable: bool },
   Dir,

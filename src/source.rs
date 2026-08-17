@@ -4,13 +4,13 @@ use anyhow::{Result, bail};
 
 /// The two supported source forms. Anything that is not `github:` is a local
 /// path; bare `owner/repo` shorthand is intentionally a local path, not GitHub.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
   GitHub(GitHubSource),
   Local(LocalSource),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GitHubSource {
   pub owner: String,
   pub repo: String,
@@ -18,7 +18,7 @@ pub struct GitHubSource {
   pub path: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalSource {
   /// As authored; resolution happens in the paths layer.
   pub path: PathBuf,

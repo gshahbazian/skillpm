@@ -17,14 +17,14 @@ pub struct Transaction {
 
 /// What the transaction expects to find at a file path at commit time.
 /// Anything else means the file changed since planning, and the commit aborts.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExpectedFile {
   Absent,
   Bytes(Vec<u8>),
 }
 
 /// What the transaction expects to find at a symlink path at commit time.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExpectedLink {
   Absent,
   /// Any symlink, correct or dangling; its destination is never touched.

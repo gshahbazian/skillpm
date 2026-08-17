@@ -12,7 +12,7 @@ use crate::store::{SnapshotStatus, Store};
 
 /// Everything a command needs to lock and install a local skill. Preparation
 /// writes only to the store — never config, lock, or targets.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PreparedLocalSkill {
   pub name: String,
   pub description: String,

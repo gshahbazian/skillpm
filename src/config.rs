@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
+
+#[cfg(test)]
+use std::io::Write;
 
 use anyhow::{Context, Result, bail};
 use toml_edit::{Array, DocumentMut, Item, Table, value};
@@ -15,13 +18,13 @@ pub const CONFIG_VERSION: i64 = 1;
 /// bootstrap form.
 const EMPTY_CONFIG: &str = "version = 1\n";
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
   pub version: i64,
   pub skills: BTreeMap<String, Skill>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Skill {
   pub source: String,
   pub r#ref: Option<String>,
@@ -36,8 +39,6 @@ pub struct ConfigDocument {
   doc: DocumentMut,
   /// The logical global path, possibly a symlink.
   path: PathBuf,
-  /// Where the bytes actually live; writes go here so the symlink survives.
-  real_path: PathBuf,
   /// Bytes as loaded; None means the file did not exist yet.
   original: Option<Vec<u8>>,
 }
@@ -53,14 +54,15 @@ impl ConfigDocument {
   pub fn load_or_empty(path: &Path) -> Result<Self> {
     match fs::read(path) {
       Ok(bytes) => Self::from_bytes(path, bytes),
-      Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Self {
-        doc: EMPTY_CONFIG.parse().expect("canonical empty config parses"),
-        // resolve dangling symlinks too, so save() creates the link's target
-        // instead of replacing the link with a regular file
-        real_path: resolve_real_path(path)?,
-        path: path.to_path_buf(),
-        original: None,
-      }),
+      Err(error) if error.kind() == io::ErrorKind::NotFound => {
+        // Reject invalid dangling symlink chains before staging other work.
+        resolve_real_path(path)?;
+        Ok(Self {
+          doc: EMPTY_CONFIG.parse().expect("canonical empty config parses"),
+          path: path.to_path_buf(),
+          original: None,
+        })
+      }
       Err(error) => Err(error).with_context(|| format!("failed to read config {}", path.display())),
     }
   }
@@ -72,10 +74,11 @@ impl ConfigDocument {
       .parse()
       .with_context(|| format!("config {} is not valid TOML", path.display()))?;
     validate(&doc)?;
+    // Reject invalid symlink chains before staging other work.
+    canonicalize_existing_prefix(path)?;
 
     Ok(Self {
       doc,
-      real_path: canonicalize_existing_prefix(path)?,
       path: path.to_path_buf(),
       original: Some(bytes),
     })
@@ -201,30 +204,28 @@ impl ConfigDocument {
   /// Atomic write via a temporary sibling of the real file; a symlinked
   /// config path stays a symlink. Commands write through the transaction
   /// layer instead; this direct write remains for this module's tests.
-  #[cfg_attr(not(test), allow(dead_code))]
+  #[cfg(test)]
   pub fn save(&self) -> Result<()> {
     validate(&self.doc).context("refusing to save an invalid config")?;
 
-    let parent = self.real_path.parent().with_context(|| {
-      format!(
-        "config {} has no parent directory",
-        self.real_path.display()
-      )
-    })?;
+    let real_path = resolve_real_path(&self.path)?;
+    let parent = real_path
+      .parent()
+      .with_context(|| format!("config {} has no parent directory", real_path.display()))?;
 
     let mut temp = tempfile::NamedTempFile::new_in(parent)
       .with_context(|| format!("failed to create temporary file in {}", parent.display()))?;
     temp.write_all(self.doc.to_string().as_bytes())?;
 
     // keep the user's permissions when overwriting
-    if let Ok(metadata) = fs::metadata(&self.real_path) {
+    if let Ok(metadata) = fs::metadata(&real_path) {
       temp.as_file().set_permissions(metadata.permissions())?;
     }
 
     temp.as_file().sync_all()?;
     temp
-      .persist(&self.real_path)
-      .with_context(|| format!("failed to write config {}", self.real_path.display()))?;
+      .persist(&real_path)
+      .with_context(|| format!("failed to write config {}", real_path.display()))?;
     Ok(())
   }
 

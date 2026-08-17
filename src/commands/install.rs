@@ -17,7 +17,7 @@ pub fn run() -> Result<()> {
   Ok(())
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct InstallSummary {
   pub skills: usize,
   pub created: usize,

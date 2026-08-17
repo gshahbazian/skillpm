@@ -22,7 +22,7 @@ pub fn run() -> Result<()> {
   Ok(())
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct UpdateSummary {
   pub skills: usize,
   pub changed: usize,
@@ -105,7 +105,6 @@ struct CommittedUpdate {
   referenced: Vec<String>,
 }
 
-#[allow(clippy::too_many_arguments)]
 fn prepare_and_commit(
   env: &CommandEnv,
   store: &Store,

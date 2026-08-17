@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use crate::paths::create_private_dir;
 use crate::snapshot::{self, EntryKind, GitFilter, SnapshotTree};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SnapshotStatus {
   Missing,
   Valid,
@@ -20,7 +20,7 @@ pub enum SnapshotStatus {
 /// Whether a commit created a new snapshot or deduplicated against an
 /// existing one. Failure cleanup must only ever remove created snapshots; a
 /// reused one may be referenced by other installed skills.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitOutcome {
   pub content_hash: String,
   pub created: bool,
@@ -212,7 +212,7 @@ impl Store {
   }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 enum DirState {
   Missing,
   Present,

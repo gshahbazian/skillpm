@@ -6,7 +6,7 @@ use std::path::{Component, Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 /// The single global runtime layout. No project-directory lookup, no overrides.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Paths {
   pub home: PathBuf,
   pub config_file: PathBuf,

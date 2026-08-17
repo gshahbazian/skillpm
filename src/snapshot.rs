@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 /// snapshot format change; every stored hash depends on it.
 const HASH_DOMAIN: &[u8] = b"skillpm snapshot v1\n";
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GitFilter {
   /// Local sources: skip any entry named `.git` at any depth.
   ExcludeGit,
@@ -21,7 +21,7 @@ pub enum GitFilter {
 /// A validated source tree: the exact entry set that hashing and
 /// materialization both consume, so they cannot disagree. Fields are private
 /// so validated entries cannot be altered after the scan.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotTree {
   root: PathBuf,
   /// Sorted bytewise by relative UTF-8 path.
@@ -34,14 +34,14 @@ impl SnapshotTree {
   }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotEntry {
   /// Normalized `/`-separated path relative to the tree root.
   pub path: String,
   pub kind: EntryKind,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryKind {
   Dir,
   File { executable: bool },
@@ -256,7 +256,7 @@ fn update_file(hasher: &mut Sha256, path: &Path) -> Result<()> {
   hasher.update(expected_len.to_be_bytes());
 
   let mut actual_len = 0u64;
-  let mut buffer = [0u8; 64 * 1024];
+  let mut buffer = [0u8; 16 * 1024];
   loop {
     let read = file
       .read(&mut buffer)

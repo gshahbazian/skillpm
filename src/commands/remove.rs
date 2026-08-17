@@ -18,7 +18,7 @@ pub fn run(name: String) -> Result<()> {
   Ok(())
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct RemoveSummary {
   pub name: String,
   pub unlinked: usize,

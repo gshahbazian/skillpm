@@ -12,7 +12,7 @@ use crate::transaction::{ExpectedLink, Transaction};
 
 /// One configured target, resolved for filesystem work and canonicalized for
 /// conflict detection (symlinked parents collapse to one canonical location).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTarget {
   pub skill: String,
   pub configured: PathBuf,
@@ -148,7 +148,7 @@ fn descendant<'a>(a: &'a ResolvedTarget, b: &'a ResolvedTarget) -> &'a ResolvedT
   }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallAction {
   Create,
   Replace,
@@ -194,7 +194,7 @@ pub fn stage_install(
   }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RemovalAction {
   /// A missing target is already removed.
   AlreadyMissing,

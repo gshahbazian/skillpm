@@ -23,7 +23,7 @@ pub fn run(source: String, targets: Vec<PathBuf>, r#ref: Option<String>) -> Resu
   Ok(())
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct AddSummary {
   pub name: String,
   pub already_configured: bool,
@@ -141,7 +141,10 @@ struct CommittedAdd {
   referenced: Vec<String>,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+  clippy::too_many_arguments,
+  reason = "transaction orchestration keeps each staged dependency explicit"
+)]
 fn stage_and_commit(
   env: &CommandEnv,
   store: &Store,

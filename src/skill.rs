@@ -8,7 +8,7 @@ use yaml_rust2::{Yaml, YamlLoader};
 pub const MAX_NAME_LENGTH: usize = 64;
 pub const MAX_DESCRIPTION_CHARS: usize = 1024;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillMetadata {
   pub name: String,
   pub description: String,
