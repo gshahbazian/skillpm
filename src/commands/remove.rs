@@ -157,6 +157,7 @@ mod tests {
           &world.offline_env(),
           &format!("skills/{name}"),
           &[PathBuf::from(format!("links/{name}"))],
+          &[],
           None,
         )
       })
@@ -261,6 +262,7 @@ mod tests {
         &world.offline_env(),
         "skills/skill-one",
         &[PathBuf::from("links/skill-one")],
+        &[],
         None,
       )
     })

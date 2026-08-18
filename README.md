@@ -17,7 +17,7 @@ cargo build --release
 ## Use
 
 ```bash
-skillpm add <source> --target <path>... [--ref <ref>]
+skillpm add <source> [--target <path>...] [--agent <agent>...] [--ref <ref>]
 skillpm install
 skillpm update
 skillpm remove <name>
@@ -42,6 +42,22 @@ skillpm add github:schpet/linear-cli/skills/linear-cli \
 skillpm add github:herdrdev/herdr/skills/herdr \
   --target ~/.agents/skills/herdr
 ```
+
+`--agent` is shorthand for a target under a known agent skills directory. The skill name is appended for you:
+
+| Value | Target |
+| --- | --- |
+| `agents` | `~/.agents/skills/<name>` |
+| `pi` | `~/.pi/agent/skills/<name>` |
+| `claude` | `~/.claude/skills/<name>` |
+
+```bash
+skillpm add github:herdrdev/herdr/skills/herdr --agent agents
+
+skillpm add github:schpet/linear-cli/skills/linear-cli --agent pi --agent claude
+```
+
+Repeat either flag, and mix them freely. `add` needs at least one of the two; targets naming the same location are deduplicated.
 
 `--ref` is optional and GitHub-only: a branch, tag, or full commit SHA. Omit it to lock the remote default branch.
 

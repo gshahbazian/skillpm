@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 
 use super::CommandEnv;
+use crate::cli::AgentDir;
 use crate::config::{ConfigDocument, Skill};
 use crate::github::{self, GitHubSkillRequest};
 use crate::local;
@@ -16,9 +17,14 @@ use crate::store::{SnapshotStatus, Store};
 use crate::targets::{self, InstallAction};
 use crate::transaction::{ExpectedFile, Transaction};
 
-pub fn run(source: String, targets: Vec<PathBuf>, r#ref: Option<String>) -> Result<()> {
+pub fn run(
+  source: String,
+  targets: Vec<PathBuf>,
+  agents: Vec<AgentDir>,
+  r#ref: Option<String>,
+) -> Result<()> {
   let env = CommandEnv::from_process()?;
-  let summary = execute(&env, &source, &targets, r#ref.as_deref())?;
+  let summary = execute(&env, &source, &targets, &agents, r#ref.as_deref())?;
   output::success(&summary.to_string());
   Ok(())
 }
@@ -55,9 +61,10 @@ pub(crate) fn execute(
   env: &CommandEnv,
   source_str: &str,
   new_targets: &[PathBuf],
+  agents: &[AgentDir],
   r#ref: Option<&str>,
 ) -> Result<AddSummary> {
-  execute_with_hook(env, source_str, new_targets, r#ref, &mut || Ok(()))
+  execute_with_hook(env, source_str, new_targets, agents, r#ref, &mut || Ok(()))
 }
 
 /// The hook runs right before the transaction commits; tests use it to
@@ -66,12 +73,13 @@ fn execute_with_hook(
   env: &CommandEnv,
   source_str: &str,
   new_targets: &[PathBuf],
+  agents: &[AgentDir],
   r#ref: Option<&str>,
   before_commit: &mut dyn FnMut() -> Result<()>,
 ) -> Result<AddSummary> {
   let paths = &env.paths;
-  if new_targets.is_empty() {
-    bail!("at least one --target is required");
+  if new_targets.is_empty() && agents.is_empty() {
+    bail!("at least one --target or --agent value is required");
   }
 
   let source = parse_source(source_str)?;
@@ -113,6 +121,7 @@ fn execute_with_hook(
     &source,
     source_str,
     new_targets,
+    agents,
     r#ref,
     &mut created_snapshots,
     before_commit,
@@ -154,6 +163,7 @@ fn stage_and_commit(
   source: &Source,
   source_str: &str,
   new_targets: &[PathBuf],
+  agents: &[AgentDir],
   r#ref: Option<&str>,
   created_snapshots: &mut Vec<String>,
   before_commit: &mut dyn FnMut() -> Result<()>,
@@ -186,7 +196,8 @@ fn stage_and_commit(
       }
       super::validate_snapshot_identity(store, &name, &entry.content_hash)?;
 
-      let added = new_target_paths(&existing_skill.targets, new_targets, &paths.home)?;
+      let incoming = incoming_targets(new_targets, agents, &name);
+      let added = new_target_paths(&existing_skill.targets, &incoming, &paths.home)?;
       (name, entry, added, true)
     }
     None => {
@@ -210,7 +221,8 @@ fn stage_and_commit(
         commit,
         content_hash,
       };
-      let deduped = new_target_paths(&[], new_targets, &paths.home)?;
+      let incoming = incoming_targets(new_targets, agents, &skill_name);
+      let deduped = new_target_paths(&[], &incoming, &paths.home)?;
       (skill_name, entry, deduped, false)
     }
   };
@@ -340,6 +352,18 @@ fn prepare_new_source(
   }
 }
 
+/// Explicit `--target` paths first, then one `<root>/<name>` path per
+/// `--agent` value in flag order. Expansion needs the validated skill name,
+/// so it cannot happen at parse time; the `~/` spelling is what lands in
+/// skillpm.toml. Duplicates fall out in `new_target_paths`.
+fn incoming_targets(explicit: &[PathBuf], agents: &[AgentDir], name: &str) -> Vec<PathBuf> {
+  let mut incoming = explicit.to_vec();
+  for agent in agents {
+    incoming.push(PathBuf::from(format!("{}/{name}", agent.skills_root())));
+  }
+  incoming
+}
+
 /// Returns only the genuinely new targets, deduplicated with the same
 /// canonical identity target planning uses — so a symlink-aliased spelling
 /// of an existing target merges away instead of tripping the duplicate check.
@@ -378,7 +402,17 @@ mod tests {
     targets: &[PathBuf],
     r#ref: Option<&str>,
   ) -> Result<AddSummary> {
-    testutil::retry_lock(|| super::execute(env, source, targets, r#ref))
+    execute_agents(env, source, targets, &[], r#ref)
+  }
+
+  fn execute_agents(
+    env: &CommandEnv,
+    source: &str,
+    targets: &[PathBuf],
+    agents: &[AgentDir],
+    r#ref: Option<&str>,
+  ) -> Result<AddSummary> {
+    testutil::retry_lock(|| super::execute(env, source, targets, agents, r#ref))
   }
 
   fn add_local(world: &World) -> Result<AddSummary> {
@@ -514,6 +548,143 @@ mod tests {
     )
     .unwrap_err();
     assert!(error.to_string().contains("only valid for GitHub"));
+    assert!(
+      !world.paths().config_file.exists(),
+      "nothing may be written"
+    );
+  }
+
+  #[test]
+  fn agents_shorthand_links_every_known_root() {
+    let world = testutil::world();
+    write_skill_md(&world.home.join("skills/local-skill"), "local-skill");
+
+    let summary = execute_agents(
+      &world.offline_env(),
+      "skills/local-skill",
+      &[],
+      &[AgentDir::Agents, AgentDir::Pi, AgentDir::Claude],
+      None,
+    )
+    .unwrap();
+    assert_eq!(summary.targets_added, 3);
+    assert_eq!(summary.created, 3);
+
+    // the ~/ spelling is what lands in the config, verbatim
+    let config = String::from_utf8(world.config_bytes()).unwrap();
+    for spelling in [
+      "~/.agents/skills/local-skill",
+      "~/.pi/agent/skills/local-skill",
+      "~/.claude/skills/local-skill",
+    ] {
+      assert!(config.contains(spelling), "missing {spelling} in {config}");
+    }
+
+    for relative in [
+      ".agents/skills/local-skill",
+      ".pi/agent/skills/local-skill",
+      ".claude/skills/local-skill",
+    ] {
+      assert!(
+        fs::read_link(world.home.join(relative)).unwrap().exists(),
+        "expected a live link at {relative}"
+      );
+    }
+  }
+
+  #[test]
+  fn agents_shorthand_appends_the_skill_md_name() {
+    let world = testutil::world();
+    // the source directory name differs from the validated frontmatter name
+    write_skill_md(&world.home.join("skills/source-dir"), "local-skill");
+
+    execute_agents(
+      &world.offline_env(),
+      "skills/source-dir",
+      &[],
+      &[AgentDir::Claude],
+      None,
+    )
+    .unwrap();
+
+    let config = String::from_utf8(world.config_bytes()).unwrap();
+    assert!(config.contains("~/.claude/skills/local-skill"));
+    assert!(
+      !config.contains(".claude/skills/source-dir"),
+      "the source directory name must not reach the target: {config}"
+    );
+    assert!(
+      fs::read_link(world.home.join(".claude/skills/local-skill"))
+        .unwrap()
+        .exists()
+    );
+  }
+
+  #[test]
+  fn agents_shorthand_merges_into_a_configured_skill() {
+    let world = testutil::world();
+    let source = world.home.join("skills/local-skill");
+    write_skill_md(&source, "local-skill");
+    add_local(&world).unwrap();
+    let lock_before = world.lock_bytes();
+
+    // the local source moves on; a target-only merge must NOT rehash it
+    fs::write(source.join("later.md"), "later\n").unwrap();
+
+    let summary = execute_agents(
+      &world.offline_env(),
+      "skills/local-skill",
+      &[],
+      &[AgentDir::Claude],
+      None,
+    )
+    .unwrap();
+    assert!(summary.already_configured);
+    assert_eq!(summary.targets_added, 1);
+    assert_eq!(summary.created, 1);
+    assert_eq!(summary.unchanged, 1, "the original target is verified");
+
+    assert_eq!(
+      world.lock_bytes(),
+      lock_before,
+      "add never performs a selective version update"
+    );
+    let config = String::from_utf8(world.config_bytes()).unwrap();
+    assert!(config.contains("~/.claude/skills/local-skill"));
+  }
+
+  #[test]
+  fn agents_shorthand_dedupes_against_an_equivalent_target() {
+    let world = testutil::world();
+    write_skill_md(&world.home.join("skills/local-skill"), "local-skill");
+
+    let summary = execute_agents(
+      &world.offline_env(),
+      "skills/local-skill",
+      &[PathBuf::from(".claude/skills/local-skill")],
+      &[AgentDir::Claude],
+      None,
+    )
+    .unwrap();
+    assert_eq!(summary.targets_added, 1, "one location, not two");
+    assert_eq!(summary.created, 1);
+
+    let config = String::from_utf8(world.config_bytes()).unwrap();
+    assert_eq!(
+      config.matches("claude/skills/local-skill").count(),
+      1,
+      "the explicit spelling is kept once: {config}"
+    );
+  }
+
+  #[test]
+  fn a_target_or_an_agent_is_required() {
+    let world = testutil::world();
+    write_skill_md(&world.home.join("skills/local-skill"), "local-skill");
+
+    let error =
+      execute_agents(&world.offline_env(), "skills/local-skill", &[], &[], None).unwrap_err();
+    assert!(error.to_string().contains("--agent"), "{error}");
     assert!(
       !world.paths().config_file.exists(),
       "nothing may be written"
@@ -781,6 +952,7 @@ targets = [
         &env,
         "skills/other-skill",
         &[PathBuf::from("links/other-skill")],
+        &[],
         None,
         &mut || {
           let mut bytes = fs::read(&config_path).unwrap();

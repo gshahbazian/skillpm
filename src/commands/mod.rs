@@ -37,8 +37,9 @@ pub fn run(command: Command) -> Result<()> {
     Command::Add {
       source,
       targets,
+      agents,
       r#ref,
-    } => add::run(source, targets, r#ref),
+    } => add::run(source, targets, agents, r#ref),
     Command::Remove { name } => remove::run(name),
   }
 }
