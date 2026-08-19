@@ -957,13 +957,21 @@ mod tests {
     path
   }
 
+  /// The deadline is generous on purpose: macOS charges a large one-time cost
+  /// (~100ms idle, over a second when the suite runs 14-wide) the first time it
+  /// execs a freshly written file, so a tight timeout makes every fake-git test
+  /// flaky on a Mac while passing on Linux CI. Tests that assert the timeout
+  /// itself use fake_client_with_timeout.
   fn fake_client(program: PathBuf, tokens: Vec<String>) -> GitClient {
-    GitClient::new(
-      program,
-      Duration::from_millis(400),
-      tokens,
-      "https://github.com/".into(),
-    )
+    fake_client_with_timeout(program, tokens, Duration::from_secs(20))
+  }
+
+  fn fake_client_with_timeout(
+    program: PathBuf,
+    tokens: Vec<String>,
+    timeout: Duration,
+  ) -> GitClient {
+    GitClient::new(program, timeout, tokens, "https://github.com/".into())
   }
 
   #[test]
@@ -1094,7 +1102,7 @@ mod tests {
   fn timeouts_kill_the_child() {
     let temp = tempfile::tempdir().unwrap();
     let program = fake_git(temp.path(), "sleep 30");
-    let client = fake_client(program, vec![]);
+    let client = fake_client_with_timeout(program, vec![], Duration::from_millis(400));
     let source = GitHubSource {
       owner: "o".into(),
       repo: "r".into(),
@@ -1117,7 +1125,7 @@ mod tests {
     // a background "helper" inherits stdout/stderr; killing only the parent
     // would leave it holding the pipes and hang the reader threads
     let program = fake_git(temp.path(), "sleep 30 &\nsleep 30");
-    let client = fake_client(program, vec![]);
+    let client = fake_client_with_timeout(program, vec![], Duration::from_millis(400));
     let source = GitHubSource {
       owner: "o".into(),
       repo: "r".into(),

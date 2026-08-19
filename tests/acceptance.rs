@@ -653,6 +653,83 @@ fn help_matches_the_documented_v1_surface() {
   let output = sandbox.skillpm(&["add", "--help"]);
   let add_help = String::from_utf8(output.stdout).unwrap();
   assert!(add_help.contains("--target"));
+  assert!(add_help.contains("--agent"));
   assert!(add_help.contains("--ref"));
   assert!(!add_help.contains("--force"));
+  // the README documents lowercase agent values only
+  for value in ["agents", "pi", "claude"] {
+    assert!(
+      add_help.contains(value),
+      "missing agent value '{value}' in help:\n{add_help}"
+    );
+  }
+  assert!(!add_help.contains("CLAUDE"), "{add_help}");
+}
+
+#[test]
+fn agents_shorthand_installs_into_known_agent_directories() {
+  let sandbox = sandbox();
+  sandbox.write_skill("skills/local-skill", "local-skill");
+
+  let (stdout, _) = sandbox.ok(&[
+    "add",
+    "skills/local-skill",
+    "--agent",
+    "claude",
+    "--agent",
+    "pi",
+  ]);
+  assert!(stdout.starts_with("added skill 'local-skill'"), "{stdout}");
+
+  let config = sandbox.read(&sandbox.config_path());
+  assert!(config.contains("~/.claude/skills/local-skill"), "{config}");
+  assert!(
+    config.contains("~/.pi/agent/skills/local-skill"),
+    "{config}"
+  );
+
+  for relative in [".claude/skills/local-skill", ".pi/agent/skills/local-skill"] {
+    let link = sandbox.home().join(relative);
+    let destination = fs::read_link(&link).unwrap();
+    assert!(
+      destination.starts_with(sandbox.store_path()),
+      "{destination:?}"
+    );
+    assert!(
+      link.join("SKILL.md").exists(),
+      "missing content at {relative}"
+    );
+  }
+
+  // mixing the shorthand with an equivalent explicit target adds one location
+  let (stdout, _) = sandbox.ok(&[
+    "add",
+    "skills/local-skill",
+    "--target",
+    ".claude/skills/local-skill",
+    "--agent",
+    "agents",
+  ]);
+  assert!(stdout.contains("1 target(s) added"), "{stdout}");
+  let config = sandbox.read(&sandbox.config_path());
+  assert_eq!(
+    config.matches("claude/skills/local-skill").count(),
+    1,
+    "{config}"
+  );
+  assert!(config.contains("~/.agents/skills/local-skill"), "{config}");
+
+  // install and remove treat shorthand targets like any other target
+  sandbox.ok(&["install"]);
+  sandbox.ok(&["remove", "local-skill"]);
+  for relative in [
+    ".claude/skills/local-skill",
+    ".pi/agent/skills/local-skill",
+    ".agents/skills/local-skill",
+  ] {
+    assert!(
+      !sandbox.home().join(relative).exists(),
+      "{relative} should be unlinked"
+    );
+  }
 }
