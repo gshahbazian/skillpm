@@ -1550,29 +1550,36 @@ exec git "$@""#,
     let remote = skill_remote();
     let log = remote.temp.path().join("git.log");
     let client = remote.logging_client(&log);
-    let store = remote.store();
 
     // the parser rejects '-' components, so construct the source directly
     // to prove the -- separator holds on its own
     let canary = remote.temp.path().join("pwned.tar");
-    let hostile = GitHubSkillRequest {
-      key: "evil".into(),
-      source: GitHubSource {
-        owner: "owner".into(),
-        repo: "repo".into(),
-        path: Some(format!("-o{}", canary.display())),
-      },
-      r#ref: Some("main".into()),
-      locked: None,
+    let source = GitHubSource {
+      owner: "owner".into(),
+      repo: "repo".into(),
+      path: Some(format!("-o{}", canary.display())),
     };
+    let commit = git(&remote.work, &["rev-parse", "HEAD"]);
+    let unpack_dir = remote.temp.path().join("unpack");
 
-    let error = prepare_github_skills(&client, &store, &[hostile]).unwrap_err();
+    let error = stage_skill(&client, &remote.bare, &unpack_dir, &commit, &source).unwrap_err();
     assert!(
       !canary.exists(),
-      "an option-shaped path must never become a git option"
+      "an option-shaped path must never become a git option: {error:#}"
     );
-    // behind --, git treats it as a pathspec that matches nothing
-    assert!(format!("{error:#}").contains("failed to prepare skill 'evil'"));
+
+    let pathspec = literal_pathspec(source.path.as_deref().unwrap());
+    let invocations = fs::read_to_string(&log).unwrap();
+    for command in [" ls-tree ", " archive "] {
+      let invocation = invocations
+        .lines()
+        .find(|line| line.contains(command))
+        .unwrap_or_else(|| panic!("missing {command:?} invocation in:\n{invocations}"));
+      assert!(
+        invocation.ends_with(&format!(" -- {pathspec}")),
+        "{command:?} did not receive a separated literal pathspec: {invocation}"
+      );
+    }
   }
 
   #[test]
