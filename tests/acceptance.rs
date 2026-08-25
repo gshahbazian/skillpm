@@ -104,8 +104,8 @@ impl Sandbox {
     self.skillpm_with(args, &[])
   }
 
-  /// Success is required; returns (stdout, stderr). The stdout contract is
-  /// one concise summary line.
+  /// Success is required; returns (stdout, stderr). Commands emit one concise
+  /// summary line, and update may follow it with the changed skill names.
   fn ok(&self, args: &[&str]) -> (String, String) {
     let output = self.skillpm(args);
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -114,11 +114,13 @@ impl Sandbox {
       output.status.success(),
       "skillpm {args:?} failed:\nstdout: {stdout}\nstderr: {stderr}"
     );
-    assert_eq!(
-      stdout.lines().count(),
-      1,
-      "stdout must be one summary line: {stdout:?}"
-    );
+    if !matches!(args, ["update"]) {
+      assert_eq!(
+        stdout.lines().count(),
+        1,
+        "stdout must be one summary line: {stdout:?}"
+      );
+    }
     assert!(
       !stdout.contains('\x1b') && !stderr.contains('\x1b'),
       "NO_COLOR must strip ANSI"
@@ -265,6 +267,7 @@ fn full_lifecycle_add_install_update_remove() {
   // update: unchanged fast path for both source kinds
   let (stdout, _) = sandbox.ok(&["update"]);
   assert!(stdout.contains("0 changed"), "{stdout}");
+  assert!(!stdout.contains("changed skills:"), "{stdout}");
   assert_eq!(sandbox.read(&sandbox.lock_path()), lock_before);
 
   // update: both kinds change and targets repoint
@@ -275,7 +278,10 @@ fn full_lifecycle_add_install_update_remove() {
   )
   .unwrap();
   let (stdout, _) = sandbox.ok(&["update"]);
-  assert!(stdout.contains("2 changed"), "{stdout}");
+  assert!(
+    stdout.ends_with("changed skills:\n- gh-skill\n- local-skill\n"),
+    "{stdout}"
+  );
   let gh_dest = fs::read_link(sandbox.home().join("links/gh-skill")).unwrap();
   assert!(
     gh_dest.join("new.md").exists(),
