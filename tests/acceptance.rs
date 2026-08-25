@@ -105,7 +105,7 @@ impl Sandbox {
   }
 
   /// Success is required; returns (stdout, stderr). Commands emit one concise
-  /// summary line, and update may follow it with the changed skill names.
+  /// summary line. A changed update follows it with the changed skill details.
   fn ok(&self, args: &[&str]) -> (String, String) {
     let output = self.skillpm(args);
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -114,9 +114,26 @@ impl Sandbox {
       output.status.success(),
       "skillpm {args:?} failed:\nstdout: {stdout}\nstderr: {stderr}"
     );
-    if !matches!(args, ["update"]) {
+    let lines: Vec<&str> = stdout.lines().collect();
+    if matches!(args, ["update"]) {
+      assert!(
+        lines
+          .first()
+          .is_some_and(|line| line.starts_with("updated ")),
+        "update stdout must start with its summary: {stdout:?}"
+      );
+      if lines[0].contains(": 0 changed,") {
+        assert_eq!(lines.len(), 1, "a no-op update must stay on one line");
+      } else {
+        assert_eq!(lines.get(1), Some(&"changed skills:"), "{stdout}");
+        assert!(
+          lines.len() > 2 && lines[2..].iter().all(|line| line.starts_with("- ")),
+          "a changed update must list every changed skill: {stdout:?}"
+        );
+      }
+    } else {
       assert_eq!(
-        stdout.lines().count(),
+        lines.len(),
         1,
         "stdout must be one summary line: {stdout:?}"
       );
@@ -157,7 +174,7 @@ impl Sandbox {
   }
 }
 
-fn git(dir: &Path, args: &[&str]) {
+fn git(dir: &Path, args: &[&str]) -> Output {
   let output = Command::new("git")
     .args(args)
     .current_dir(dir)
@@ -179,6 +196,14 @@ fn git(dir: &Path, args: &[&str]) {
     "git {args:?} failed: {}",
     String::from_utf8_lossy(&output.stderr)
   );
+  output
+}
+
+fn git_stdout(dir: &Path, args: &[&str]) -> String {
+  String::from_utf8(git(dir, args).stdout)
+    .unwrap()
+    .trim()
+    .to_string()
 }
 
 /// A bare remote at <base>/<owner>/<repo>.git with skills under skills/.
@@ -214,11 +239,12 @@ fn make_remote(base: &Path, owner: &str, repo: &str, skills: &[&str]) -> PathBuf
   work
 }
 
-fn push_commit(work: &Path, bare: &Path, rel_file: &str, contents: &str) {
+fn push_commit(work: &Path, bare: &Path, rel_file: &str, contents: &str) -> String {
   fs::write(work.join(rel_file), contents).unwrap();
   git(work, &["add", "."]);
   git(work, &["commit", "-m", "update"]);
   git(work, &["push", bare.to_str().unwrap(), "main:main"]);
+  git_stdout(work, &["rev-parse", "HEAD"])
 }
 
 /// chmod -R u+w before deletion: committed snapshots are read-only.
@@ -271,16 +297,26 @@ fn full_lifecycle_add_install_update_remove() {
   assert_eq!(sandbox.read(&sandbox.lock_path()), lock_before);
 
   // update: both kinds change and targets repoint
-  push_commit(&work, &bare, "skills/gh-skill/new.md", "remote change\n");
+  let previous_checkout = git_stdout(&work, &["rev-parse", "HEAD"]);
+  let checkout = push_commit(&work, &bare, "skills/gh-skill/new.md", "remote change\n");
   fs::write(
     sandbox.home().join("skills/local-skill/new.md"),
     "local change\n",
   )
   .unwrap();
   let (stdout, _) = sandbox.ok(&["update"]);
-  assert!(
-    stdout.ends_with("changed skills:\n- gh-skill\n- local-skill\n"),
-    "{stdout}"
+  assert_eq!(
+    stdout,
+    format!(
+      concat!(
+        "updated 2 skill(s): 2 changed, 0 link(s) created, 2 repointed, 0 unchanged\n",
+        "changed skills:\n",
+        "- gh-skill ({} -> {})\n",
+        "- local-skill\n",
+      ),
+      &previous_checkout[..7],
+      &checkout[..7],
+    )
   );
   let gh_dest = fs::read_link(sandbox.home().join("links/gh-skill")).unwrap();
   assert!(
@@ -341,7 +377,7 @@ fn cache_deletion_reconstructs_exact_locked_versions() {
 
   // wipe the disposable cache entirely AND advance the remote
   force_remove(&sandbox.home().join(".local/share/skillpm"));
-  push_commit(&work, &bare, "skills/gh-skill/new.md", "added later\n");
+  let _ = push_commit(&work, &bare, "skills/gh-skill/new.md", "added later\n");
 
   sandbox.ok(&["install"]);
   let dest = fs::read_link(sandbox.home().join("links/gh-skill")).unwrap();
