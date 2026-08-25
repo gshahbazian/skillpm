@@ -25,7 +25,7 @@ pub fn run() -> Result<()> {
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct UpdateSummary {
   pub skills: usize,
-  pub changed: usize,
+  pub changed_skills: Vec<ChangedSkill>,
   pub lock_written: bool,
   pub created: usize,
   pub repaired: usize,
@@ -33,13 +33,77 @@ pub(crate) struct UpdateSummary {
   pub prune_warnings: usize,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct ChangedSkill {
+  name: String,
+  checkout_change: Option<CheckoutChange>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct CheckoutChange {
+  previous: Option<String>,
+  current: String,
+}
+
+impl ChangedSkill {
+  fn from_lock_entries(
+    name: String,
+    previous: Option<&LockedSkill>,
+    current: &LockedSkill,
+  ) -> Self {
+    Self {
+      name,
+      checkout_change: current.commit.as_ref().map(|checkout| CheckoutChange {
+        previous: previous.and_then(|entry| entry.commit.clone()),
+        current: checkout.clone(),
+      }),
+    }
+  }
+}
+
+impl fmt::Display for ChangedSkill {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{}", self.name)?;
+
+    let Some(change) = &self.checkout_change else {
+      return Ok(());
+    };
+
+    let previous = change
+      .previous
+      .as_deref()
+      .map(short_checkout)
+      .unwrap_or("none");
+    write!(f, " ({previous} -> {})", short_checkout(&change.current))
+  }
+}
+
+fn short_checkout(checkout: &str) -> &str {
+  checkout.get(..7).unwrap_or(checkout)
+}
+
 impl fmt::Display for UpdateSummary {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(
       f,
       "updated {} skill(s): {} changed, {} link(s) created, {} repointed, {} unchanged",
-      self.skills, self.changed, self.created, self.repaired, self.links_unchanged
-    )
+      self.skills,
+      self.changed_skills.len(),
+      self.created,
+      self.repaired,
+      self.links_unchanged
+    )?;
+
+    if self.changed_skills.is_empty() {
+      return Ok(());
+    }
+
+    write!(f, "\nchanged skills:")?;
+    for skill in &self.changed_skills {
+      write!(f, "\n- {skill}")?;
+    }
+
+    Ok(())
   }
 }
 
@@ -184,11 +248,22 @@ fn prepare_and_commit(
     );
   }
 
-  let changed = new_lock
+  let changed_skills = new_lock
     .skills
     .iter()
-    .filter(|(name, entry)| reusable.skills.get(name.as_str()) != Some(entry))
-    .count();
+    .filter_map(|(name, current)| {
+      let previous = reusable.skills.get(name.as_str());
+      if previous == Some(current) {
+        return None;
+      }
+
+      Some(ChangedSkill::from_lock_entries(
+        name.clone(),
+        previous,
+        current,
+      ))
+    })
+    .collect();
 
   // an unchanged lockfile is not rewritten
   let rendered = lockfile::render_validated(&new_lock)?;
@@ -205,7 +280,7 @@ fn prepare_and_commit(
 
   let mut summary = UpdateSummary {
     skills: config.skills.len(),
-    changed,
+    changed_skills,
     lock_written,
     created: 0,
     repaired: 0,
@@ -312,6 +387,80 @@ targets = ["links/gh-skill"]
     fs::metadata(path).unwrap().ino()
   }
 
+  fn changed_names(summary: &UpdateSummary) -> Vec<&str> {
+    summary
+      .changed_skills
+      .iter()
+      .map(|skill| skill.name.as_str())
+      .collect()
+  }
+
+  #[test]
+  fn summary_lists_changed_skills_after_the_main_line() {
+    let summary = UpdateSummary {
+      skills: 3,
+      changed_skills: vec![
+        ChangedSkill {
+          name: "gh-skill".to_string(),
+          checkout_change: Some(CheckoutChange {
+            previous: Some("a1b2c3d000000000000000000000000000000000".to_string()),
+            current: "d4e5f6a000000000000000000000000000000000".to_string(),
+          }),
+        },
+        ChangedSkill {
+          name: "local-skill".to_string(),
+          checkout_change: None,
+        },
+      ],
+      lock_written: true,
+      created: 0,
+      repaired: 2,
+      links_unchanged: 1,
+      prune_warnings: 0,
+    };
+
+    assert_eq!(
+      summary.to_string(),
+      concat!(
+        "updated 3 skill(s): 2 changed, 0 link(s) created, 2 repointed, 1 unchanged\n",
+        "changed skills:\n",
+        "- gh-skill (a1b2c3d -> d4e5f6a)\n",
+        "- local-skill",
+      )
+    );
+  }
+
+  #[test]
+  fn summary_omits_the_changed_skills_list_when_nothing_changed() {
+    let summary = UpdateSummary {
+      skills: 1,
+      changed_skills: Vec::new(),
+      lock_written: false,
+      created: 0,
+      repaired: 0,
+      links_unchanged: 1,
+      prune_warnings: 0,
+    };
+
+    assert_eq!(
+      summary.to_string(),
+      "updated 1 skill(s): 0 changed, 0 link(s) created, 0 repointed, 1 unchanged"
+    );
+  }
+
+  #[test]
+  fn github_skill_without_a_prior_lock_shows_none_as_its_previous_checkout() {
+    let skill = ChangedSkill {
+      name: "gh-skill".to_string(),
+      checkout_change: Some(CheckoutChange {
+        previous: None,
+        current: "d4e5f6a000000000000000000000000000000000".to_string(),
+      }),
+    };
+
+    assert_eq!(skill.to_string(), "gh-skill (none -> d4e5f6a)");
+  }
+
   #[test]
   fn bootstraps_missing_lock_and_is_idempotent() {
     let fixture = fixture();
@@ -319,7 +468,10 @@ targets = ["links/gh-skill"]
 
     let first = execute(&env).unwrap();
     assert_eq!(first.skills, 2);
-    assert_eq!(first.changed, 2);
+    assert_eq!(changed_names(&first), ["gh-skill", "local-skill"]);
+    let checkout_change = first.changed_skills[0].checkout_change.as_ref().unwrap();
+    assert_eq!(checkout_change.previous, None);
+    assert_eq!(checkout_change.current, fixture.remote.head_sha());
     assert!(first.lock_written);
     assert_eq!(first.created, 2);
 
@@ -340,7 +492,7 @@ targets = ["links/gh-skill"]
       second,
       UpdateSummary {
         skills: 2,
-        changed: 0,
+        changed_skills: Vec::new(),
         lock_written: false,
         created: 0,
         repaired: 0,
@@ -359,12 +511,16 @@ targets = ["links/gh-skill"]
     execute(&env).unwrap();
 
     let old_dest = link_dest(&fixture.world, "links/gh-skill");
+    let old_head = locked_commit(&fixture.world, "gh-skill");
     let new_head = fixture
       .remote
       .push_new_commit("skills/gh-skill/extra.md", "new content\n");
 
     let summary = execute(&env).unwrap();
-    assert_eq!(summary.changed, 1);
+    assert_eq!(changed_names(&summary), ["gh-skill"]);
+    let checkout_change = summary.changed_skills[0].checkout_change.as_ref().unwrap();
+    assert_eq!(checkout_change.previous.as_deref(), Some(old_head.as_str()));
+    assert_eq!(checkout_change.current, new_head);
     assert!(summary.lock_written);
     assert_eq!(summary.repaired, 1, "the target link is repointed");
     assert_eq!(summary.links_unchanged, 1, "the local skill is untouched");
@@ -414,7 +570,10 @@ targets = ["links/gh-skill"]
     );
 
     let summary = execute(&env).unwrap();
-    assert_eq!(summary.changed, 1);
+    assert_eq!(changed_names(&summary), ["gh-skill"]);
+    let checkout_change = summary.changed_skills[0].checkout_change.as_ref().unwrap();
+    assert_eq!(checkout_change.previous.as_deref(), Some(before.as_str()));
+    assert_eq!(checkout_change.current, new_head);
     let after = locked_commit(&fixture.world, "gh-skill");
     assert_ne!(before, after);
     assert_eq!(after, new_head);
@@ -435,7 +594,7 @@ targets = ["links/gh-skill"]
 
     // offline env: a fixed commit with a populated store never touches git
     let summary = execute(&fixture.world.offline_env()).unwrap();
-    assert_eq!(summary.changed, 0);
+    assert!(summary.changed_skills.is_empty());
     assert!(!summary.lock_written);
     assert_eq!(locked_commit(&fixture.world, "gh-skill"), pinned);
   }
@@ -454,7 +613,8 @@ targets = ["links/gh-skill"]
     .unwrap();
 
     let summary = execute(&env).unwrap();
-    assert_eq!(summary.changed, 1);
+    assert_eq!(changed_names(&summary), ["local-skill"]);
+    assert_eq!(summary.changed_skills[0].checkout_change, None);
     assert_eq!(summary.repaired, 1);
 
     let new_dest = link_dest(&fixture.world, "links/local-skill");
@@ -472,7 +632,15 @@ targets = ["links/gh-skill"]
     fs::write(fixture.world.paths().lockfile, "not [ toml").unwrap();
     let summary = execute(&env).unwrap();
     assert!(summary.lock_written);
-    assert_eq!(summary.changed, 2);
+    assert_eq!(changed_names(&summary), ["gh-skill", "local-skill"]);
+    assert_eq!(
+      summary.changed_skills[0]
+        .checkout_change
+        .as_ref()
+        .unwrap()
+        .previous,
+      None
+    );
 
     fs::write(fixture.world.paths().lockfile, "version = 9\n").unwrap();
     let error = execute(&env).unwrap_err();
