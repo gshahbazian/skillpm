@@ -35,9 +35,14 @@ pub(crate) struct UpdateSummary {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct ChangedSkill {
-  pub name: String,
-  pub previous_checkout: Option<String>,
-  pub checkout: Option<String>,
+  name: String,
+  checkout_change: Option<CheckoutChange>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct CheckoutChange {
+  previous: Option<String>,
+  current: String,
 }
 
 impl ChangedSkill {
@@ -48,11 +53,10 @@ impl ChangedSkill {
   ) -> Self {
     Self {
       name,
-      previous_checkout: current
-        .commit
-        .as_ref()
-        .and_then(|_| previous.and_then(|entry| entry.commit.clone())),
-      checkout: current.commit.clone(),
+      checkout_change: current.commit.as_ref().map(|checkout| CheckoutChange {
+        previous: previous.and_then(|entry| entry.commit.clone()),
+        current: checkout.clone(),
+      }),
     }
   }
 }
@@ -61,16 +65,16 @@ impl fmt::Display for ChangedSkill {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     write!(f, "{}", self.name)?;
 
-    let Some(checkout) = &self.checkout else {
+    let Some(change) = &self.checkout_change else {
       return Ok(());
     };
 
-    let previous = self
-      .previous_checkout
+    let previous = change
+      .previous
       .as_deref()
       .map(short_checkout)
       .unwrap_or("none");
-    write!(f, " ({previous} -> {})", short_checkout(checkout))
+    write!(f, " ({previous} -> {})", short_checkout(&change.current))
   }
 }
 
@@ -398,13 +402,14 @@ targets = ["links/gh-skill"]
       changed_skills: vec![
         ChangedSkill {
           name: "gh-skill".to_string(),
-          previous_checkout: Some("a1b2c3d000000000000000000000000000000000".to_string()),
-          checkout: Some("d4e5f6a000000000000000000000000000000000".to_string()),
+          checkout_change: Some(CheckoutChange {
+            previous: Some("a1b2c3d000000000000000000000000000000000".to_string()),
+            current: "d4e5f6a000000000000000000000000000000000".to_string(),
+          }),
         },
         ChangedSkill {
           name: "local-skill".to_string(),
-          previous_checkout: None,
-          checkout: None,
+          checkout_change: None,
         },
       ],
       lock_written: true,
@@ -447,8 +452,10 @@ targets = ["links/gh-skill"]
   fn github_skill_without_a_prior_lock_shows_none_as_its_previous_checkout() {
     let skill = ChangedSkill {
       name: "gh-skill".to_string(),
-      previous_checkout: None,
-      checkout: Some("d4e5f6a000000000000000000000000000000000".to_string()),
+      checkout_change: Some(CheckoutChange {
+        previous: None,
+        current: "d4e5f6a000000000000000000000000000000000".to_string(),
+      }),
     };
 
     assert_eq!(skill.to_string(), "gh-skill (none -> d4e5f6a)");
@@ -462,11 +469,9 @@ targets = ["links/gh-skill"]
     let first = execute(&env).unwrap();
     assert_eq!(first.skills, 2);
     assert_eq!(changed_names(&first), ["gh-skill", "local-skill"]);
-    assert_eq!(first.changed_skills[0].previous_checkout, None);
-    assert_eq!(
-      first.changed_skills[0].checkout.as_deref(),
-      Some(fixture.remote.head_sha().as_str())
-    );
+    let checkout_change = first.changed_skills[0].checkout_change.as_ref().unwrap();
+    assert_eq!(checkout_change.previous, None);
+    assert_eq!(checkout_change.current, fixture.remote.head_sha());
     assert!(first.lock_written);
     assert_eq!(first.created, 2);
 
@@ -513,14 +518,9 @@ targets = ["links/gh-skill"]
 
     let summary = execute(&env).unwrap();
     assert_eq!(changed_names(&summary), ["gh-skill"]);
-    assert_eq!(
-      summary.changed_skills[0].previous_checkout.as_deref(),
-      Some(old_head.as_str())
-    );
-    assert_eq!(
-      summary.changed_skills[0].checkout.as_deref(),
-      Some(new_head.as_str())
-    );
+    let checkout_change = summary.changed_skills[0].checkout_change.as_ref().unwrap();
+    assert_eq!(checkout_change.previous.as_deref(), Some(old_head.as_str()));
+    assert_eq!(checkout_change.current, new_head);
     assert!(summary.lock_written);
     assert_eq!(summary.repaired, 1, "the target link is repointed");
     assert_eq!(summary.links_unchanged, 1, "the local skill is untouched");
@@ -571,14 +571,9 @@ targets = ["links/gh-skill"]
 
     let summary = execute(&env).unwrap();
     assert_eq!(changed_names(&summary), ["gh-skill"]);
-    assert_eq!(
-      summary.changed_skills[0].previous_checkout.as_deref(),
-      Some(before.as_str())
-    );
-    assert_eq!(
-      summary.changed_skills[0].checkout.as_deref(),
-      Some(new_head.as_str())
-    );
+    let checkout_change = summary.changed_skills[0].checkout_change.as_ref().unwrap();
+    assert_eq!(checkout_change.previous.as_deref(), Some(before.as_str()));
+    assert_eq!(checkout_change.current, new_head);
     let after = locked_commit(&fixture.world, "gh-skill");
     assert_ne!(before, after);
     assert_eq!(after, new_head);
@@ -619,7 +614,7 @@ targets = ["links/gh-skill"]
 
     let summary = execute(&env).unwrap();
     assert_eq!(changed_names(&summary), ["local-skill"]);
-    assert_eq!(summary.changed_skills[0].checkout, None);
+    assert_eq!(summary.changed_skills[0].checkout_change, None);
     assert_eq!(summary.repaired, 1);
 
     let new_dest = link_dest(&fixture.world, "links/local-skill");
@@ -638,7 +633,14 @@ targets = ["links/gh-skill"]
     let summary = execute(&env).unwrap();
     assert!(summary.lock_written);
     assert_eq!(changed_names(&summary), ["gh-skill", "local-skill"]);
-    assert_eq!(summary.changed_skills[0].previous_checkout, None);
+    assert_eq!(
+      summary.changed_skills[0]
+        .checkout_change
+        .as_ref()
+        .unwrap()
+        .previous,
+      None
+    );
 
     fs::write(fixture.world.paths().lockfile, "version = 9\n").unwrap();
     let error = execute(&env).unwrap_err();
