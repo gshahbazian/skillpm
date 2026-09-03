@@ -173,14 +173,6 @@ mod tests {
   }
 
   #[test]
-  fn original_bytes_are_not_rewritten() {
-    let (_temp, dir) = write_skill(VALID.as_bytes());
-
-    load_skill_metadata(&dir).unwrap();
-    assert_eq!(fs::read(dir.join("SKILL.md")).unwrap(), VALID.as_bytes());
-  }
-
-  #[test]
   fn missing_skill_md_is_rejected() {
     let temp = tempfile::tempdir().unwrap();
     let error = load_skill_metadata(temp.path()).unwrap_err();

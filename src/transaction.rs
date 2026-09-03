@@ -567,19 +567,14 @@ mod tests {
   }
 
   #[test]
-  fn removing_a_missing_symlink_is_accepted() {
+  fn planned_missing_removals_are_noops_and_rechecked_at_commit() {
     let world = world();
-    let mut tx = Transaction::new();
-    tx.remove_symlink(
-      &world.root().join("targets/never-existed"),
-      ExpectedLink::Absent,
-    );
-    tx.commit().unwrap();
-  }
+    let never_existed = world.root().join("targets/never-existed");
 
-  #[test]
-  fn planned_missing_removals_recheck_at_commit() {
-    let world = world();
+    let mut tx = Transaction::new();
+    tx.remove_symlink(&never_existed, ExpectedLink::Absent);
+    tx.commit().unwrap();
+
     let planned_missing = world.root().join("targets/was-missing");
 
     let mut tx = Transaction::new();

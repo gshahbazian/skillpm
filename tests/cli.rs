@@ -20,7 +20,7 @@ fn skillpm(args: &[&str]) -> Output {
 
 #[test]
 fn commands_on_a_fresh_home_fail_with_errors_on_stderr_only() {
-  for args in [vec!["update"], vec!["remove", "x"]] {
+  for args in [vec!["install"], vec!["update"], vec!["remove", "x"]] {
     let output = skillpm(&args);
 
     assert!(!output.status.success(), "expected failure for {args:?}");
@@ -39,21 +39,6 @@ fn commands_on_a_fresh_home_fail_with_errors_on_stderr_only() {
       "expected the bootstrap hint for {args:?}: {stderr}"
     );
   }
-}
-
-#[test]
-fn install_on_a_fresh_home_reports_missing_setup() {
-  let output = skillpm(&["install"]);
-
-  assert!(!output.status.success());
-  assert!(output.stdout.is_empty());
-
-  let stderr = String::from_utf8(output.stderr).unwrap();
-  assert!(stderr.contains("error: "), "missing error prefix: {stderr}");
-  assert!(
-    stderr.contains("run `skillpm add`"),
-    "expected the bootstrap hint: {stderr}"
-  );
 }
 
 #[test]
@@ -78,10 +63,4 @@ fn usage_errors_report_on_stderr_with_a_failing_status() {
     stderr.contains("--target"),
     "expected usage mentioning --target: {stderr}"
   );
-}
-
-#[test]
-fn help_and_version_are_available() {
-  assert!(skillpm(&["--help"]).status.success());
-  assert!(skillpm(&["--version"]).status.success());
 }

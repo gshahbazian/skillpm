@@ -675,6 +675,8 @@ fn global_lookup_ignores_the_working_directory() {
 fn help_matches_the_documented_v1_surface() {
   let sandbox = sandbox();
 
+  assert!(sandbox.skillpm(&["--version"]).status.success());
+
   let output = sandbox.skillpm(&["--help"]);
   assert!(output.status.success());
   let help = String::from_utf8(output.stdout).unwrap();

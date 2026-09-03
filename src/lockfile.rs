@@ -490,19 +490,9 @@ content_hash = "{HASH_B}"
 "#
     );
     assert_eq!(render(&mixed_lockfile()), expected);
-  }
 
-  #[test]
-  fn golden_github_without_ref_omits_the_ref_line() {
-    let mut lockfile = Lockfile::empty();
-    lockfile.skills.insert(
-      "x".into(),
-      LockedSkill {
-        r#ref: None,
-        ..github_entry()
-      },
-    );
-
+    let mut lockfile = mixed_lockfile();
+    lockfile.skills.get_mut("frontend-design").unwrap().r#ref = None;
     let rendered = render(&lockfile);
     assert!(!rendered.contains("ref ="));
     assert!(rendered.contains("commit ="));

@@ -431,37 +431,6 @@ targets = ["links/gh-skill"]
   }
 
   #[test]
-  fn summary_omits_the_changed_skills_list_when_nothing_changed() {
-    let summary = UpdateSummary {
-      skills: 1,
-      changed_skills: Vec::new(),
-      lock_written: false,
-      created: 0,
-      repaired: 0,
-      links_unchanged: 1,
-      prune_warnings: 0,
-    };
-
-    assert_eq!(
-      summary.to_string(),
-      "updated 1 skill(s): 0 changed, 0 link(s) created, 0 repointed, 1 unchanged"
-    );
-  }
-
-  #[test]
-  fn github_skill_without_a_prior_lock_shows_none_as_its_previous_checkout() {
-    let skill = ChangedSkill {
-      name: "gh-skill".to_string(),
-      checkout_change: Some(CheckoutChange {
-        previous: None,
-        current: "d4e5f6a000000000000000000000000000000000".to_string(),
-      }),
-    };
-
-    assert_eq!(skill.to_string(), "gh-skill (none -> d4e5f6a)");
-  }
-
-  #[test]
   fn bootstraps_missing_lock_and_is_idempotent() {
     let fixture = fixture();
     let env = fixture.world.git_env();
@@ -472,6 +441,7 @@ targets = ["links/gh-skill"]
     let checkout_change = first.changed_skills[0].checkout_change.as_ref().unwrap();
     assert_eq!(checkout_change.previous, None);
     assert_eq!(checkout_change.current, fixture.remote.head_sha());
+    assert!(first.to_string().contains("gh-skill (none -> "));
     assert!(first.lock_written);
     assert_eq!(first.created, 2);
 

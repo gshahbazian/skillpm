@@ -398,8 +398,14 @@ mod tests {
   }
 
   #[test]
-  fn commit_stores_and_verifies() {
+  fn missing_and_committed_snapshots_report_their_status() {
     let fixture = fixture();
+    let absent = format!("sha256:{}", "0".repeat(64));
+    assert_eq!(
+      fixture.store.verify_snapshot(&absent).unwrap(),
+      SnapshotStatus::Missing
+    );
+
     let hash = commit(&fixture);
 
     let path = fixture.store.snapshot_path(&hash).unwrap();
@@ -483,16 +489,6 @@ mod tests {
   }
 
   #[test]
-  fn missing_snapshots_are_reported_missing() {
-    let fixture = fixture();
-    let absent = format!("sha256:{}", "0".repeat(64));
-    assert_eq!(
-      fixture.store.verify_snapshot(&absent).unwrap(),
-      SnapshotStatus::Missing
-    );
-  }
-
-  #[test]
   #[cfg(unix)]
   fn symlink_at_snapshot_path_is_corrupt_not_followed() {
     let fixture = fixture();
@@ -535,6 +531,9 @@ mod tests {
 
   #[test]
   fn prune_removes_unreferenced_and_staging_but_keeps_referenced() {
+    let empty = fixture();
+    assert!(empty.store.prune(&BTreeSet::new()).is_empty());
+
     let fixture = fixture();
     let keep = commit(&fixture);
 
@@ -661,12 +660,5 @@ mod tests {
     assert_eq!(mode_of(&path), 0o555);
     assert_eq!(mode_of(&path.join("docs")), 0o555);
     assert_eq!(mode_of(&path.join("docs/guide.md")), 0o444);
-  }
-
-  #[test]
-  fn prune_on_an_empty_store_is_a_no_op() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::new(&temp.path().join("never-created"));
-    assert!(store.prune(&BTreeSet::new()).is_empty());
   }
 }

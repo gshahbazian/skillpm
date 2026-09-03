@@ -48,14 +48,14 @@ mod tests {
   use super::*;
 
   #[test]
-  fn color_requires_a_tty() {
-    assert!(color_enabled(true, false));
-    assert!(!color_enabled(false, false));
-  }
-
-  #[test]
-  fn no_color_wins_even_on_a_tty() {
-    assert!(!color_enabled(true, true));
-    assert!(!color_enabled(false, true));
+  fn color_depends_on_the_terminal_and_no_color() {
+    for (stderr_is_tty, no_color, expected) in [
+      (true, false, true),
+      (false, false, false),
+      (true, true, false),
+      (false, true, false),
+    ] {
+      assert_eq!(color_enabled(stderr_is_tty, no_color), expected);
+    }
   }
 }

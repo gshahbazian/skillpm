@@ -306,15 +306,20 @@ mod tests {
   }
 
   #[test]
-  fn absolute_paths_pass_through() {
-    let resolved = resolve_user_path(Path::new("/opt/skills/x"), &home()).unwrap();
-    assert_eq!(resolved, PathBuf::from("/opt/skills/x"));
-  }
+  fn paths_resolve_without_expanding_literals() {
+    let cases = [
+      ("/opt/skills/x", PathBuf::from("/opt/skills/x")),
+      ("skills/x", home().join("skills/x")),
+      ("$HOME/skills", home().join("$HOME/skills")),
+      ("skills/~x", home().join("skills/~x")),
+    ];
 
-  #[test]
-  fn relative_paths_are_home_based() {
-    let resolved = resolve_user_path(Path::new("skills/x"), &home()).unwrap();
-    assert_eq!(resolved, home().join("skills/x"));
+    for (input, expected) in cases {
+      assert_eq!(
+        resolve_user_path(Path::new(input), &home()).unwrap(),
+        expected
+      );
+    }
   }
 
   #[test]
@@ -333,18 +338,6 @@ mod tests {
   fn user_tilde_expansion_is_rejected() {
     let error = resolve_user_path(Path::new("~other/skills"), &home()).unwrap_err();
     assert!(error.to_string().contains("tilde"));
-  }
-
-  #[test]
-  fn environment_variables_are_not_expanded() {
-    let resolved = resolve_user_path(Path::new("$HOME/skills"), &home()).unwrap();
-    assert_eq!(resolved, home().join("$HOME/skills"));
-  }
-
-  #[test]
-  fn non_leading_tildes_are_literal() {
-    let resolved = resolve_user_path(Path::new("skills/~x"), &home()).unwrap();
-    assert_eq!(resolved, home().join("skills/~x"));
   }
 
   #[test]

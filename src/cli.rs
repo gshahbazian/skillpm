@@ -76,13 +76,21 @@ mod tests {
   }
 
   #[test]
-  fn install_parses() {
-    assert_eq!(parse(&["skillpm", "install"]).unwrap(), Command::Install);
-  }
+  fn simple_commands_parse() {
+    let cases: &[(&[&str], Command)] = &[
+      (&["skillpm", "install"], Command::Install),
+      (&["skillpm", "update"], Command::Update),
+      (
+        &["skillpm", "remove", "frontend-design"],
+        Command::Remove {
+          name: "frontend-design".into(),
+        },
+      ),
+    ];
 
-  #[test]
-  fn update_parses() {
-    assert_eq!(parse(&["skillpm", "update"]).unwrap(), Command::Update);
+    for (args, expected) in cases {
+      assert_eq!(&parse(args).unwrap(), expected, "failed to parse {args:?}");
+    }
   }
 
   #[test]
@@ -194,8 +202,20 @@ mod tests {
   }
 
   #[test]
-  fn add_rejects_a_bare_agents_flag() {
-    assert!(parse(&["skillpm", "add", "skills/x", "--agent"]).is_err());
+  fn value_flags_require_values() {
+    for args in [
+      &["skillpm", "add", "skills/x", "--agent"][..],
+      &[
+        "skillpm",
+        "add",
+        "github:a/b",
+        "--target",
+        ".claude/skills/b",
+        "--ref",
+      ],
+    ] {
+      assert!(parse(args).is_err(), "expected an error for {args:?}");
+    }
   }
 
   #[test]
@@ -245,31 +265,6 @@ mod tests {
   }
 
   #[test]
-  fn remove_parses_name() {
-    assert_eq!(
-      parse(&["skillpm", "remove", "frontend-design"]).unwrap(),
-      Command::Remove {
-        name: "frontend-design".into(),
-      }
-    );
-  }
-
-  #[test]
-  fn bare_invocation_is_an_error() {
-    assert!(parse(&["skillpm"]).is_err());
-  }
-
-  #[test]
-  fn unknown_subcommand_is_an_error() {
-    assert!(parse(&["skillpm", "sync"]).is_err());
-  }
-
-  #[test]
-  fn add_requires_a_source() {
-    assert!(parse(&["skillpm", "add", "--target", ".claude/skills/x"]).is_err());
-  }
-
-  #[test]
   fn add_requires_a_target_or_an_agent() {
     let error = parse(&["skillpm", "add", "github:anthropics/skills/frontend-design"]).unwrap_err();
     let message = error.to_string();
@@ -278,38 +273,18 @@ mod tests {
   }
 
   #[test]
-  fn add_rejects_a_bare_ref_flag() {
-    assert!(
-      parse(&[
-        "skillpm",
-        "add",
-        "github:a/b",
-        "--target",
-        ".claude/skills/b",
-        "--ref"
-      ])
-      .is_err()
-    );
-  }
-
-  #[test]
-  fn remove_requires_a_name() {
-    assert!(parse(&["skillpm", "remove"]).is_err());
-  }
-
-  #[test]
-  fn remove_rejects_extra_names() {
-    assert!(parse(&["skillpm", "remove", "one", "two"]).is_err());
-  }
-
-  #[test]
-  fn install_rejects_selective_arguments() {
-    assert!(parse(&["skillpm", "install", "frontend-design"]).is_err());
-  }
-
-  #[test]
-  fn update_rejects_selective_arguments() {
-    assert!(parse(&["skillpm", "update", "frontend-design"]).is_err());
+  fn invalid_command_shapes_are_rejected() {
+    for args in [
+      &["skillpm"][..],
+      &["skillpm", "sync"],
+      &["skillpm", "add", "--target", ".claude/skills/x"],
+      &["skillpm", "remove"],
+      &["skillpm", "remove", "one", "two"],
+      &["skillpm", "install", "frontend-design"],
+      &["skillpm", "update", "frontend-design"],
+    ] {
+      assert!(parse(args).is_err(), "expected an error for {args:?}");
+    }
   }
 
   #[test]

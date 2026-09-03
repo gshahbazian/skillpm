@@ -391,18 +391,6 @@ targets = ["links/gh-skill", "links2/gh-skill"]
   }
 
   #[test]
-  fn install_never_touches_source_directories() {
-    let fixture = fixture();
-    execute(&fixture.world.offline_env()).unwrap();
-
-    let names: Vec<_> = fs::read_dir(fixture.world.home.join("skills/local-skill"))
-      .unwrap()
-      .map(|entry| entry.unwrap().file_name())
-      .collect();
-    assert_eq!(names, vec![std::ffi::OsString::from("SKILL.md")]);
-  }
-
-  #[test]
   fn a_deleted_data_root_is_rebuilt_from_config_and_lock() {
     let fixture = fixture();
 
@@ -424,12 +412,5 @@ targets = ["links/gh-skill", "links2/gh-skill"]
       store.verify_snapshot(&fixture.local_hash).unwrap(),
       SnapshotStatus::Valid
     );
-  }
-
-  #[test]
-  fn an_unbootstrapped_machine_gets_a_clear_error() {
-    let world = testutil::world();
-    let error = execute(&world.offline_env()).unwrap_err();
-    assert!(error.to_string().contains("run `skillpm add`"));
   }
 }

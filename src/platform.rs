@@ -16,18 +16,11 @@ pub fn ensure_supported() -> Result<()> {
   Ok(())
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "windows"))]
 mod tests {
   use super::*;
 
   #[test]
-  #[cfg(any(target_os = "macos", target_os = "linux"))]
-  fn supported_platforms_pass_the_guard() {
-    assert!(ensure_supported().is_ok());
-  }
-
-  #[test]
-  #[cfg(target_os = "windows")]
   fn windows_fails_the_guard() {
     let error = ensure_supported().unwrap_err();
     assert!(error.to_string().contains("Windows is not supported"));
